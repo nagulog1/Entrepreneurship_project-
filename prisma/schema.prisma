@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String        @id @default(cuid()) @map("_id")
+  name          String
+  email         String        @unique
+  emailVerified DateTime?
+  image         String?
+  college       String?
+  branch        String?
+  year          Int?
+  bio           String?
+  skills        String[]
+  xp            Int           @default(0)
+  streak        Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  submissions   Submission[]
+  bookmarks     EventBookmark[]
+  teamMembers   TeamMember[]
+}
+
+model Account {
+  id                String  @id @default(cuid()) @map("_id")
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid()) @map("_id")
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id])
+}
+
+model Event {
+  id          String         @id @default(cuid()) @map("_id")
+  title       String
+  org         String
+  banner      String
+  date        String
+  deadline    String
+  mode        String
+  city        String
+  prize       String
+  difficulty  String
+  teamSize    String
+  category    String
+  tags        String[]
+  registered  Int            @default(0)
+  featured    Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+
+  bookmarks   EventBookmark[]
+}
+
+model EventBookmark {
+  id        String   @id @default(cuid()) @map("_id")
+  userId    String
+  eventId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id])
+  event Event @relation(fields: [eventId], references: [id])
+
+  @@unique([userId, eventId])
+}
+
+model Challenge {
+  id          String       @id @default(cuid()) @map("_id")
+  title       String
+  difficulty  String
+  acceptance  Float
+  tags        String[]
+  submissions String
+  description String?
+  examples    Json?
+  constraints String[]
+  createdAt   DateTime     @default(now())
+
+  userSubmissions Submission[]
+}
+
+model Submission {
+  id          String    @id @default(cuid()) @map("_id")
+  userId      String
+  challengeId String
+  code        String
+  language    String
+  status      String    // "accepted" | "wrong_answer" | "time_limit"
+  runtime     String?
+  memory      String?
+  createdAt   DateTime  @default(now())
+
+  user      User      @relation(fields: [userId], references: [id])
+  challenge Challenge @relation(fields: [challengeId], references: [id])
+}
+
+model Team {
+  id        String       @id @default(cuid()) @map("_id")
+  name      String
+  eventId   String?
+  createdAt DateTime     @default(now())
+
+  members   TeamMember[]
+}
+
+model TeamMember {
+  id        String   @id @default(cuid()) @map("_id")
+  teamId    String
+  userId    String
+  role      String   @default("member")
+  joinedAt  DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([teamId, userId])
+}
