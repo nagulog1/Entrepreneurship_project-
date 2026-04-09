@@ -1,0 +1,16 @@
+{
+  "indexes": [
+    { "collectionGroup": "events",       "queryScope": "COLLECTION", "fields": [{ "fieldPath": "status",    "order": "ASCENDING"  }, { "fieldPath": "isFeatured",  "order": "DESCENDING" }] },
+    { "collectionGroup": "events",       "queryScope": "COLLECTION", "fields": [{ "fieldPath": "category",  "order": "ASCENDING"  }, { "fieldPath": "status",      "order": "ASCENDING"  }] },
+    { "collectionGroup": "events",       "queryScope": "COLLECTION", "fields": [{ "fieldPath": "isTrending","order": "DESCENDING" }, { "fieldPath": "createdAt",   "order": "DESCENDING" }] },
+    { "collectionGroup": "challenges",   "queryScope": "COLLECTION", "fields": [{ "fieldPath": "difficulty","order": "ASCENDING"  }, { "fieldPath": "totalSolved", "order": "DESCENDING" }] },
+    { "collectionGroup": "challenges",   "queryScope": "COLLECTION", "fields": [{ "fieldPath": "domain",    "order": "ASCENDING"  }, { "fieldPath": "difficulty",  "order": "ASCENDING"  }] },
+    { "collectionGroup": "users",        "queryScope": "COLLECTION", "fields": [{ "fieldPath": "stats.xp",  "order": "DESCENDING" }] },
+    { "collectionGroup": "users",        "queryScope": "COLLECTION", "fields": [{ "fieldPath": "college",   "order": "ASCENDING"  }, { "fieldPath": "stats.collegeRank", "order": "ASCENDING" }] },
+    { "collectionGroup": "forumThreads", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "category",  "order": "ASCENDING"  }, { "fieldPath": "createdAt",   "order": "DESCENDING" }] },
+    { "collectionGroup": "forumThreads", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "isPinned",  "order": "DESCENDING" }, { "fieldPath": "createdAt",   "order": "DESCENDING" }] },
+    { "collectionGroup": "teams",        "queryScope": "COLLECTION", "fields": [{ "fieldPath": "status",    "order": "ASCENDING"  }, { "fieldPath": "createdAt",   "order": "DESCENDING" }] },
+    { "collectionGroup": "contests",     "queryScope": "COLLECTION", "fields": [{ "fieldPath": "status",    "order": "ASCENDING"  }, { "fieldPath": "startTime",   "order": "ASCENDING"  }] }
+  ],
+  "fieldOverrides": []
+}

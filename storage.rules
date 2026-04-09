@@ -1,0 +1,16 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn()         { return request.auth != null; }
+    function isOwner(userId)      { return request.auth.uid == userId; }
+    function isImage()            { return request.resource.contentType.matches('image/.*'); }
+    function maxSize(mb)          { return request.resource.size < mb * 1024 * 1024; }
+
+    match /users/{userId}/profile/{f} { allow read: if true;          allow write: if isSignedIn() && isOwner(userId) && isImage() && maxSize(5); }
+    match /events/{eventId}/{f}       { allow read: if true;          allow write: if isSignedIn() && isImage() && maxSize(10); }
+    match /teams/{teamId}/{f}         { allow read: if true;          allow write: if isSignedIn() && isImage() && maxSize(5); }
+    match /uploads/{userId}/{f}       { allow read: if isSignedIn();  allow write: if isSignedIn() && isOwner(userId) && maxSize(20); }
+    match /certificates/{userId}/{f}  { allow read: if isSignedIn() && isOwner(userId); allow write: if false; }
+    match /challenges/{challengeId}/{f}{ allow read: if true;         allow write: if false; }
+  }
+}

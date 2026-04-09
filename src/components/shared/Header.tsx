@@ -1,146 +1,288 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useAppStore } from "@/stores/useAppStore";
+import { useState } from 'react';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { useAppStore, useLevel } from '@/stores/useAppStore';
+import { useAuthContext } from '@/contexts/AuthContext';
+import AuthModal from '@/components/auth/AuthModal';
 
 const NAV_ITEMS = [
-  { href: "/", label: "🏠 Home" },
-  { href: "/events", label: "🚀 Events" },
-  { href: "/challenges", label: "⚡ Practice" },
-  { href: "/teams", label: "🤝 Teams" },
-  { href: "/leaderboard", label: "🏆 Ranks" },
+  { href: '/', label: '🏠 Home' },
+  { href: '/events', label: '🎯 Events' },
+  { href: '/challenges', label: '⚡ Challenges' },
+  { href: '/contests', label: '🏆 Contests' },
+  { href: '/learn', label: '📚 Learn' },
+  { href: '/teams', label: '🤝 Teams' },
+  { href: '/forum', label: '💬 Forum' },
+  { href: '/leaderboard', label: '📊 Leaderboard' },
 ];
 
 export default function Header() {
   const pathname = usePathname();
-  const xp = useAppStore((s) => s.xp);
+  const router = useRouter();
+  const { xp, notification, clearNotif } = useAppStore();
+  const { level, levelTitle } = useLevel();
+  const { isAuthenticated, userProfile, user, signOut, loading } = useAuthContext();
 
-  const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+
+  const handleSignOut = async () => {
+    setShowUserMenu(false);
+    await signOut();
+    router.push('/');
+  };
+
+  // Avatar: real photo URL or initials
+  const avatarLetter =
+    userProfile?.displayName?.charAt(0).toUpperCase() ||
+    user?.displayName?.charAt(0).toUpperCase() ||
+    'U';
+
+  const photoURL = user?.photoURL;
 
   return (
-    <header
-      style={{
-        background: "#0F0F1A",
-        borderBottom: "1px solid #1E1E35",
-        padding: "0 24px",
-        display: "flex",
-        alignItems: "center",
-        gap: 24,
-        height: 60,
-        position: "sticky",
-        top: 0,
-        zIndex: 100,
-      }}
-    >
-      {/* Logo */}
-      <Link href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+    <>
+      {/* ── Notification Toast ── */}
+      {notification && (
         <div
+          className="notif"
           style={{
-            width: 32,
-            height: 32,
-            background: "linear-gradient(135deg, #6C3BFF, #10B981)",
-            borderRadius: 8,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 16,
+            background: notification.type === 'success' ? '#10B98122' : '#EF444422',
+            border: `1px solid ${notification.type === 'success' ? '#10B98155' : '#EF444455'}`,
+            color: notification.type === 'success' ? '#10B981' : '#EF4444',
+            cursor: 'pointer',
           }}
+          onClick={clearNotif}
         >
-          ⚡
+          {notification.msg}
         </div>
-        <span
-          style={{
-            fontFamily: "'Space Grotesk', sans-serif",
-            fontWeight: 700,
-            fontSize: 20,
-            background: "linear-gradient(135deg, #6C3BFF, #10B981)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-          }}
-        >
-          Uni-O
-        </span>
-      </Link>
+      )}
 
-      {/* Nav */}
-      <nav style={{ display: "flex", gap: 4, flex: 1 }}>
-        {NAV_ITEMS.map(({ href, label }) => (
-          <Link
-            key={href}
-            href={href}
-            className={`nav-item ${isActive(href) ? "active" : ""}`}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 8,
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: 500,
-              transition: "all 0.2s",
-              textDecoration: "none",
-              display: "inline-flex",
-              alignItems: "center",
-              color: isActive(href) ? "#F0F0FF" : "#8B8BAD",
-              background: isActive(href) ? "#6C3BFF22" : "transparent",
-              border: isActive(href) ? "1px solid #6C3BFF44" : "1px solid transparent",
-            }}
-          >
-            {label}
-          </Link>
-        ))}
-      </nav>
-
-      {/* Right */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div
-          style={{
-            background: "#6C3BFF22",
-            border: "1px solid #6C3BFF44",
-            borderRadius: 20,
-            padding: "4px 12px",
-            fontSize: 13,
-            color: "#8B5CF6",
-            fontWeight: 600,
-          }}
-        >
-          ⚡ {xp} XP
-        </div>
+      {/* ── Header Bar ── */}
+      <header
+        style={{
+          background: '#0F0F1A',
+          borderBottom: '1px solid #2D2D50',
+          padding: '0 24px',
+          height: 60,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          position: 'sticky',
+          top: 0,
+          zIndex: 100,
+        }}
+      >
+        {/* Logo */}
         <Link
-          href="/profile"
-          className="btn-ghost"
+          href="/"
           style={{
-            padding: "6px 14px",
-            display: "flex",
-            alignItems: "center",
+            display: 'flex',
+            alignItems: 'center',
             gap: 8,
-            textDecoration: "none",
-            background: "transparent",
-            color: "#8B8BAD",
-            border: "1px solid #2D2D50",
-            borderRadius: 6,
-            fontSize: 13,
-            transition: "all 0.2s",
+            textDecoration: 'none',
+            marginRight: 12,
           }}
         >
           <div
             style={{
-              width: 28,
-              height: 28,
-              borderRadius: "50%",
-              background: "linear-gradient(135deg, #6C3BFF, #8B5CF6)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 12,
+              width: 32,
+              height: 32,
+              background: 'linear-gradient(135deg,#6C3BFF,#8B5CF6)',
+              borderRadius: 8,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 16,
               fontWeight: 700,
             }}
           >
-            You
+            ⚡
           </div>
-          Profile
+          <span
+            style={{
+              fontFamily: "'Space Grotesk', sans-serif",
+              fontWeight: 700,
+              fontSize: 18,
+              color: '#F0F0FF',
+            }}
+          >
+            Uni-O
+          </span>
         </Link>
-      </div>
-    </header>
+
+        {/* Nav Items */}
+        <nav style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, overflowX: 'auto' }}>
+          {NAV_ITEMS.map(({ href, label }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`nav-item ${pathname === href ? 'active' : ''}`}
+            >
+              {label}
+            </Link>
+          ))}
+        </nav>
+
+        {/* Right Section */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+          {/* XP Badge */}
+          <div
+            style={{
+              background: '#6C3BFF22',
+              border: '1px solid #6C3BFF44',
+              borderRadius: 20,
+              padding: '4px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              color: '#8B5CF6',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            ⚡ {xp.toLocaleString()} XP · Lv.{level} {levelTitle}
+          </div>
+
+          {/* Auth section */}
+          {loading ? (
+            <div
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: '50%',
+                background: '#2D2D50',
+                animation: 'pulse 1.5s infinite',
+              }}
+            />
+          ) : isAuthenticated ? (
+            <div style={{ position: 'relative' }}>
+              {/* Avatar button */}
+              <button
+                onClick={() => setShowUserMenu((v) => !v)}
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: '50%',
+                  border: '2px solid #6C3BFF55',
+                  cursor: 'pointer',
+                  overflow: 'hidden',
+                  padding: 0,
+                  background: photoURL ? 'transparent' : 'linear-gradient(135deg,#6C3BFF,#8B5CF6)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  fontSize: 14,
+                  fontWeight: 700,
+                }}
+              >
+                {photoURL ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={photoURL} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  avatarLetter
+                )}
+              </button>
+
+              {/* Dropdown */}
+              {showUserMenu && (
+                <>
+                  {/* Backdrop */}
+                  <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 199 }}
+                    onClick={() => setShowUserMenu(false)}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 42,
+                      right: 0,
+                      background: '#1E1E35',
+                      border: '1px solid #2D2D50',
+                      borderRadius: 12,
+                      padding: 8,
+                      minWidth: 180,
+                      zIndex: 200,
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                    }}
+                  >
+                    {/* User info */}
+                    <div style={{ padding: '8px 12px 12px', borderBottom: '1px solid #2D2D50', marginBottom: 8 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: '#F0F0FF' }}>
+                        {userProfile?.displayName || user?.displayName || 'User'}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#5A5A80', marginTop: 2 }}>
+                        {user?.email}
+                      </div>
+                    </div>
+
+                    {[
+                      { label: '👤 My Profile', href: '/profile' },
+                      { label: '🔔 Notifications', href: '/notifications' },
+                    ].map(({ label, href }) => (
+                      <button
+                        key={href}
+                        onClick={() => { setShowUserMenu(false); router.push(href); }}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                          background: 'transparent',
+                          border: 'none',
+                          borderRadius: 8,
+                          padding: '8px 12px',
+                          color: '#A0A0C0',
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#2D2D50'; (e.currentTarget as HTMLButtonElement).style.color = '#F0F0FF'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = '#A0A0C0'; }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+
+                    <div style={{ borderTop: '1px solid #2D2D50', marginTop: 8, paddingTop: 8 }}>
+                      <button
+                        onClick={handleSignOut}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                          background: 'transparent',
+                          border: 'none',
+                          borderRadius: 8,
+                          padding: '8px 12px',
+                          color: '#EF4444',
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        🚪 Sign Out
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <button
+              className="btn-primary"
+              style={{ padding: '7px 16px', fontSize: 13 }}
+              onClick={() => setShowAuthModal(true)}
+            >
+              Sign In
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* Auth Modal */}
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+    </>
   );
 }

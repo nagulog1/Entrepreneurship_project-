@@ -1,22 +1,35 @@
-import type { Metadata } from "next";
-import Header from "@/components/shared/Header";
-import Notification from "@/components/shared/Notification";
-import "@/styles/globals.css";
+import type { Metadata } from 'next';
+import '../styles/globals.css';
+import Header from '@/components/shared/Header';
+import { AuthProvider } from '@/contexts/AuthContext';
 
 export const metadata: Metadata = {
-  title: "Uni-O — Hackathons. Code. Collaborate. Win.",
-  description: "India's premier platform for college students — discover hackathons, sharpen your DSA skills, and build legendary teams.",
+  title: 'Uni-O — Hackathon & Skill Platform',
+  description:
+    'Find hackathons, build skills with coding challenges, and form teams — all in one place for Indian college students.',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
-      <body style={{ minHeight: "100vh", background: "#0A0A14", color: "#F0F0FF" }}>
-        <Header />
-        <Notification />
-        <main style={{ maxWidth: 1200, margin: "0 auto", padding: "24px" }}>
-          {children}
-        </main>
+      <body>
+        <AuthProvider>
+          <Header />
+          <main
+            style={{
+              maxWidth: 1280,
+              margin: '0 auto',
+              padding: '24px 24px 60px',
+              minHeight: 'calc(100vh - 60px)',
+            }}
+          >
+            {children}
+          </main>
+        </AuthProvider>
       </body>
     </html>
   );

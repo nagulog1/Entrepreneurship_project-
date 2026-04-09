@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+
+      match /submissions/{s}  { allow read: if isOwner(userId); allow create: if isOwner(userId); allow update,delete: if false; }
+      match /bookmarks/{b}    { allow read,write: if isOwner(userId); }
+      match /notifications/{n}{ allow read,update: if isOwner(userId); allow create: if isSignedIn(); allow delete: if isOwner(userId); }
+      match /activityFeed/{a} { allow read: if isSignedIn(); allow create,update,delete: if isOwner(userId); }
+      match /achievements/{a} { allow read: if isSignedIn(); allow write: if false; }
+    }
+
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isAdmin() || resource.data.createdBy == request.auth.uid;
+      allow delete: if isAdmin();
+      match /registrations/{r} { allow read: if isSignedIn(); allow create: if isSignedIn(); allow update: if isAdmin() || resource.data.userId == request.auth.uid; allow delete: if isAdmin(); }
+      match /reviews/{r}       { allow read: if true; allow create: if isSignedIn(); allow update,delete: if resource.data.userId == request.auth.uid || isAdmin(); }
+    }
+
+    match /challenges/{challengeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+      match /discussions/{d} {
+        allow read: if true;
+        allow create: if isSignedIn();
+        allow update,delete: if resource.data.userId == request.auth.uid || isAdmin();
+        match /replies/{r} { allow read: if true; allow create: if isSignedIn(); allow update,delete: if resource.data.userId == request.auth.uid || isAdmin(); }
+      }
+    }
+
+    match /teams/{teamId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if resource.data.createdBy == request.auth.uid || isAdmin();
+      match /messages/{m}  { allow read: if isSignedIn(); allow create: if isSignedIn(); allow update,delete: if resource.data.senderId == request.auth.uid; }
+      match /requests/{r}  { allow read: if isSignedIn(); allow create: if isSignedIn(); allow update: if resource.data.fromUserId == request.auth.uid || get(/databases/$(database)/documents/teams/$(teamId)).data.createdBy == request.auth.uid; }
+    }
+
+    match /teamRequests/{r}   { allow read: if isSignedIn(); allow create: if isSignedIn(); allow update,delete: if resource.data.fromUserId == request.auth.uid; }
+    match /forumThreads/{t}   { allow read: if true; allow create: if isSignedIn(); allow update: if resource.data.authorId == request.auth.uid || isAdmin(); allow delete: if resource.data.authorId == request.auth.uid || isAdmin();
+      match /replies/{r}      { allow read: if true; allow create: if isSignedIn(); allow update,delete: if resource.data.authorId == request.auth.uid || isAdmin(); }
+    }
+    match /badges/{b}         { allow read: if true; allow write: if isAdmin(); }
+    match /learningPaths/{p}  { allow read: if true; allow write: if isAdmin(); match /enrollments/{u} { allow read: if isSignedIn(); allow create,update: if isOwner(u); } }
+    match /contests/{c}       { allow read: if true; allow write: if isAdmin(); match /leaderboard/{u} { allow read: if true; allow write: if false; } }
+    match /mentorships/{m}    { allow read: if isSignedIn() && (resource.data.mentorId == request.auth.uid || resource.data.menteeId == request.auth.uid); allow create: if isSignedIn(); allow update: if isSignedIn() && (resource.data.mentorId == request.auth.uid || resource.data.menteeId == request.auth.uid); }
+    match /adminConfig/{c}    { allow read: if true; allow write: if isAdmin(); }
+    match /stats/{s}          { allow read: if true; allow write: if false; }
+    match /analytics/{d}      { allow read: if isAdmin(); allow write: if false; }
+  }
+}

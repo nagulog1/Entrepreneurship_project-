@@ -1,38 +1,39 @@
 {
-  "name": "uni-o",
+  "name": "unio",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:studio": "prisma studio",
-    "db:seed": "ts-node prisma/seed.ts"
+    "firebase:emulate": "firebase emulators:start",
+    "seed": "npx ts-node --project tsconfig.json scripts/seed-firebase.ts"
   },
   "dependencies": {
-    "next": "14.2.3",
+    "@hookform/resolvers": "^3.6.0",
+    "@monaco-editor/react": "^4.6.0",
+    "date-fns": "^3.6.0",
+    "firebase": "^10.14.1",
+    "firebase-admin": "^12.1.0",
+    "framer-motion": "^11.2.10",
+    "lucide-react": "^0.390.0",
+    "next": "^14.2.35",
     "react": "^18",
     "react-dom": "^18",
-    "@prisma/client": "^5.14.0",
-    "zustand": "^4.5.2",
-    "clsx": "^2.1.1",
-    "tailwind-merge": "^2.3.0",
-    "next-auth": "^4.24.7"
+    "react-hook-form": "^7.51.5",
+    "react-hot-toast": "^2.4.1",
+    "react-markdown": "^9.0.1",
+    "recharts": "^2.12.7",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.2"
   },
   "devDependencies": {
-    "typescript": "^5",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "postcss": "^8",
-    "tailwindcss": "^3.4.1",
-    "prisma": "^5.14.0",
-    "ts-node": "^10.9.2",
     "eslint": "^8",
-    "eslint-config-next": "14.2.3"
+    "eslint-config-next": "14.2.3",
+    "typescript": "^5"
   }
 }
