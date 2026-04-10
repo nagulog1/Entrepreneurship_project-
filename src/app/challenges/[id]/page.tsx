@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { CHALLENGES } from "@/lib/data/challenges";
-import { SAMPLE_CODE } from "@/lib/data/constants";
+import { SAMPLE_CODE, SAMPLE_CODE_BY_LANGUAGE } from "@/lib/data/constants";
 import { useAppStore } from "@/stores/useAppStore";
 import { useCodeRunner } from "@/hooks/useCodeRunner";
 import { difficultyColor, difficultyBg } from "@/lib/utils/difficulty";
@@ -16,9 +16,12 @@ import ShimmerCard from "@/components/shared/ShimmerCard";
 const LANGUAGES = ["JavaScript", "Python", "Java", "C++"];
 
 function starterCodeForLanguage(challenge: Challenge | null, language: string): string {
-  if (!challenge?.starterCode) return SAMPLE_CODE;
-  const key = language.toLowerCase();
-  return challenge.starterCode[key] || challenge.starterCode.javascript || SAMPLE_CODE;
+  if (challenge?.starterCode) {
+    const key = language.toLowerCase();
+    if (challenge.starterCode[key]) return challenge.starterCode[key];
+    if (challenge.starterCode.javascript) return challenge.starterCode.javascript;
+  }
+  return SAMPLE_CODE_BY_LANGUAGE[language] || SAMPLE_CODE;
 }
 
 export default function ChallengeDetailPage() {
@@ -85,6 +88,22 @@ export default function ChallengeDetailPage() {
     ];
   }, [challenge]);
 
+  // Build test cases for the execution engine
+  const testCasesForRunner = useMemo(() => {
+    if (challenge?.sampleTestCases?.length) {
+      return challenge.sampleTestCases.map((tc) => ({
+        input: tc.input,
+        expected: tc.output,
+      }));
+    }
+    // Fallback test cases for Two Sum (default challenge)
+    return [
+      { input: "nums = [2,7,11,15], target = 9", expected: "[0,1]" },
+      { input: "nums = [3,2,4], target = 6", expected: "[1,2]" },
+      { input: "nums = [3,3], target = 6", expected: "[0,1]" },
+    ];
+  }, [challenge]);
+
   const handleRun = (action: "run" | "submit") => {
     if (!challenge) return;
 
@@ -94,21 +113,24 @@ export default function ChallengeDetailPage() {
       language: lang,
     });
 
-    run(code, lang, () => {
-      const newlySolved = !solvedChallenges.has(challenge.id);
-      void logAnalyticsEvent("challenge_result", {
-        challenge_id: challenge.id,
-        action,
-        accepted: true,
-        newly_solved: newlySolved,
-      });
-      if (!solvedChallenges.has(challenge.id)) {
-        markSolved(challenge.id);
-        addXp(challenge.xpReward || 10);
-        showNotif(`✓ Accepted! +${challenge.xpReward || 10} XP earned`, "success");
-      } else {
-        showNotif("✓ All test cases passed!", "success");
-      }
+    run(code, lang, {
+      testCases: testCasesForRunner,
+      onSuccess: () => {
+        const newlySolved = !solvedChallenges.has(challenge.id);
+        void logAnalyticsEvent("challenge_result", {
+          challenge_id: challenge.id,
+          action,
+          accepted: true,
+          newly_solved: newlySolved,
+        });
+        if (!solvedChallenges.has(challenge.id)) {
+          markSolved(challenge.id);
+          addXp(challenge.xpReward || 10);
+          showNotif(`✓ Accepted! +${challenge.xpReward || 10} XP earned`, "success");
+        } else {
+          showNotif("✓ All test cases passed!", "success");
+        }
+      },
     });
   };
 
@@ -298,6 +320,25 @@ export default function ChallengeDetailPage() {
                   <span style={{ fontSize: 13, color: "#8B8BAD" }}>Runtime: {runResult.runtime}</span>
                   <span style={{ fontSize: 13, color: "#8B8BAD" }}>Memory: {runResult.memory}</span>
                 </div>
+
+                {runResult.error && (
+                  <div style={{
+                    background: "#1A0A0A",
+                    border: "1px solid #3B1010",
+                    borderRadius: 6,
+                    padding: "10px 14px",
+                    marginBottom: 10,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 12,
+                    color: "#EF4444",
+                    whiteSpace: "pre-wrap",
+                    maxHeight: 120,
+                    overflow: "auto",
+                  }}>
+                    {runResult.error}
+                  </div>
+                )}
+
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {runResult.cases.map((tc, i) => (
                     <div

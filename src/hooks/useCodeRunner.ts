@@ -3,16 +3,10 @@
 import { useState, useCallback } from 'react';
 import type { RunResult } from '@/types';
 
-const MOCK_RESULT: RunResult = {
-  status: 'accepted',
-  runtime: `${Math.floor(Math.random() * 40 + 20)} ms`,
-  memory: `${Math.floor(Math.random() * 4 + 12)} MB`,
-  cases: [
-    { input: '[2,7,11,15], 9', expected: '[0,1]', got: '[0,1]', pass: true },
-    { input: '[3,2,4], 6', expected: '[1,2]', got: '[1,2]', pass: true },
-    { input: '[3,3], 6', expected: '[0,1]', got: '[0,1]', pass: true },
-  ],
-};
+export interface CodeRunnerTestCase {
+  input: string;
+  expected: string;
+}
 
 export function useCodeRunner() {
   const [running, setRunning] = useState(false);
@@ -20,53 +14,46 @@ export function useCodeRunner() {
 
   const run = useCallback(
     async (
-      codeOrCallback?: string | (() => void),
-      language?: string,
-      onSuccess?: () => void
-    ) => {
-      // Legacy: run(callback) — existing pages pass a callback as first arg
-      if (typeof codeOrCallback === 'function') {
-        const cb = codeOrCallback;
-        setRunning(true);
-        setRunResult(null);
-        await new Promise((r) => setTimeout(r, 1400));
-        setRunResult({ ...MOCK_RESULT, runtime: `${Math.floor(Math.random() * 40 + 20)} ms` });
-        cb();
-        setRunning(false);
-        return;
+      code: string,
+      language: string,
+      options?: {
+        testCases?: CodeRunnerTestCase[];
+        functionName?: string;
+        onSuccess?: () => void;
       }
-
-      // New: run(code, language, onSuccess)
-      const code = codeOrCallback;
+    ) => {
       setRunning(true);
       setRunResult(null);
 
       try {
-        if (code && language && process.env.NEXT_PUBLIC_JUDGE0_API_URL) {
-          const res = await fetch('/api/execute', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code, language }),
-          });
-          if (res.ok) {
-            const data: RunResult = await res.json();
-            setRunResult(data);
-            if (data.status === 'accepted' && onSuccess) onSuccess();
-            return;
-          }
+        const res = await fetch('/api/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code,
+            language,
+            testCases: options?.testCases,
+            functionName: options?.functionName,
+          }),
+        });
+
+        const data: RunResult = await res.json();
+        setRunResult(data);
+
+        if (data.status === 'accepted' && options?.onSuccess) {
+          options.onSuccess();
         }
       } catch {
-        // Fall through to mock
+        setRunResult({
+          status: 'runtime_error',
+          runtime: '—',
+          memory: '—',
+          cases: [],
+          error: 'Network error. Check your connection and try again.',
+        });
+      } finally {
+        setRunning(false);
       }
-
-      // Fallback mock
-      await new Promise((r) => setTimeout(r, 1400));
-      const mock: RunResult = {
-        ...MOCK_RESULT,
-        runtime: `${Math.floor(Math.random() * 40 + 20)} ms`,
-      };
-      setRunResult(mock);
-      if (onSuccess) onSuccess();
     },
     []
   );
