@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import type { Challenge } from "@/types";
 import { difficultyColor, difficultyBg } from "@/lib/utils/difficulty";
+import { logAnalyticsEvent } from "@/lib/analytics";
 
 interface ChallengeRowProps {
   challenge: Challenge;
@@ -15,7 +16,15 @@ export default function ChallengeRow({ challenge: c, solved }: ChallengeRowProps
   return (
     <div
       className="challenge-row"
-      onClick={() => router.push(`/challenges/${c.id}`)}
+      onClick={() => {
+        void logAnalyticsEvent("select_content", {
+          content_type: "challenge_row",
+          content_id: c.id,
+          content_label: c.title,
+          difficulty: c.difficulty,
+        });
+        router.push(`/challenges/${c.id}`);
+      }}
     >
       <div style={{ width: 32, textAlign: "center" }}>
         {solved ? (

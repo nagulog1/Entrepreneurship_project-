@@ -1,10 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import ChallengeRow from "@/components/challenges/ChallengeRow";
 import { CHALLENGES } from "@/lib/data/challenges";
 import { useAppStore, useLevel } from "@/stores/useAppStore";
+import { getChallenges } from "@/lib/firebase/firestore";
+import { mapChallengeToListChallenge } from "@/lib/utils/firestoreMappers";
+import { isAlgoliaSearchConfigured, searchChallengesInAlgolia } from "@/lib/search/algolia";
+import type { Challenge } from "@/types";
+import ShimmerCard from "@/components/shared/ShimmerCard";
 
 const DIFFICULTIES = ["All", "Easy", "Medium", "Hard"] as const;
 type Difficulty = (typeof DIFFICULTIES)[number];
@@ -17,19 +21,79 @@ const DIFF_COLORS: Record<string, { bg: string; text: string }> = {
 };
 
 export default function ChallengesPage() {
-  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [diffFilter, setDiffFilter] = useState<Difficulty>("All");
+  const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [remoteSearchResults, setRemoteSearchResults] = useState<Challenge[] | null>(null);
+  const [searchingRemote, setSearchingRemote] = useState(false);
+  const [loading, setLoading] = useState(true);
   const { xp, streak, solvedChallenges } = useAppStore();
 
-  const filteredChallenges = CHALLENGES.filter((c) => {
+  useEffect(() => {
+    let mounted = true;
+
+    getChallenges({ limitCount: 120 })
+      .then((docs) => {
+        if (!mounted) return;
+        const mapped = docs.map((c) => mapChallengeToListChallenge(c));
+        setChallenges(mapped.length ? mapped : CHALLENGES);
+      })
+      .catch(() => {
+        if (mounted) setChallenges(CHALLENGES);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const filteredChallenges = useMemo(() => challenges.filter((c) => {
     const matchQ =
       !searchQuery ||
       c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchD = diffFilter === "All" || c.difficulty === diffFilter;
     return matchQ && matchD;
-  });
+  }), [challenges, diffFilter, searchQuery]);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setRemoteSearchResults(null);
+      setSearchingRemote(false);
+      return;
+    }
+
+    if (!isAlgoliaSearchConfigured()) {
+      setRemoteSearchResults(null);
+      return;
+    }
+
+    let active = true;
+    setSearchingRemote(true);
+
+    searchChallengesInAlgolia(q, diffFilter)
+      .then((hits) => {
+        if (!active) return;
+        setRemoteSearchResults(hits);
+      })
+      .catch(() => {
+        if (!active) return;
+        setRemoteSearchResults(null);
+      })
+      .finally(() => {
+        if (active) setSearchingRemote(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [searchQuery, diffFilter]);
+
+  const displayedChallenges = remoteSearchResults ?? filteredChallenges;
 
   return (
     <div className="fade-in">
@@ -92,10 +156,11 @@ export default function ChallengesPage() {
 
       {/* Challenge List */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {filteredChallenges.map((c) => (
+        {(loading || searchingRemote) && [1, 2, 3, 4, 5].map((i) => <ShimmerCard key={i} height={60} />)}
+        {displayedChallenges.map((c) => (
           <ChallengeRow key={c.id} challenge={c} solved={solvedChallenges.has(c.id)} />
         ))}
-        {filteredChallenges.length === 0 && (
+        {!loading && !searchingRemote && displayedChallenges.length === 0 && (
           <div style={{ textAlign: "center", padding: 60, color: "#5A5A80" }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>🔍</div>
             <div style={{ fontSize: 18, fontWeight: 600, color: "#8B8BAD" }}>No challenges found</div>

@@ -9,7 +9,7 @@ interface Profile {
   branch: string;
   year: string;
   skills: string[];
-  bio?: string;
+  bio: string;
   socialLinks?: {
     github?: string;
     linkedin?: string;

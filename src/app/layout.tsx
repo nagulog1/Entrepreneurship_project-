@@ -1,6 +1,10 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import '../styles/globals.css';
 import Header from '@/components/shared/Header';
+import Notification from '@/components/shared/Notification';
+import FcmManager from '@/components/shared/FcmManager';
+import AnalyticsTracker from '@/components/shared/AnalyticsTracker';
 import { AuthProvider } from '@/contexts/AuthContext';
 
 export const metadata: Metadata = {
@@ -18,6 +22,11 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <AuthProvider>
+          <Suspense fallback={null}>
+            <AnalyticsTracker />
+          </Suspense>
+          <FcmManager />
+          <Notification />
           <Header />
           <main
             style={{

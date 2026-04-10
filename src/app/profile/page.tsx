@@ -1,12 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import EditProfileModal from "@/components/profile/EditProfileModal";
 import { EVENTS } from "@/lib/data/events";
 import { useAppStore, useLevel } from "@/stores/useAppStore";
+import { useAuthContext } from "@/contexts/AuthContext";
+import { getEvents, getUserActivity, updateUserProfile } from "@/lib/firebase/firestore";
+import { mapEventToCardEvent } from "@/lib/utils/firestoreMappers";
+import type { Event } from "@/types";
 
 type ProfileTab = "overview" | "badges" | "events" | "settings";
+type ActivityItem = readonly ["✅" | "🏆" | "⚡" | "🤝" | "🔥", string, string, string, string];
 
 const BADGES = [
   ["🌟", "First Steps", "Solved your first problem", true, "#F59E0B"],
@@ -19,22 +24,121 @@ const BADGES = [
   ["🦁", "Legend", "Solve 1000 problems", false, "#EF4444"],
 ] as const;
 
-const RECENT_ACTIVITY = [
+const RECENT_ACTIVITY: ActivityItem[] = [
   ["✅", "Solved Two Sum", "Easy · 10 XP", "2h ago", "#10B981"],
   ["🏆", "Registered for HackWithInfy 2025", "Team Event", "1d ago", "#6C3BFF"],
   ["✅", "Solved Valid Parentheses", "Easy · 10 XP", "2d ago", "#10B981"],
   ["🔥", "Reached 7-day streak!", "Bonus XP awarded", "3d ago", "#F59E0B"],
-] as const;
+];
+
+function formatTimeAgo(value: unknown): string {
+  if (!value) return "recently";
+  let date: Date;
+  if (typeof (value as { toDate?: () => Date }).toDate === "function") {
+    date = (value as { toDate: () => Date }).toDate();
+  } else {
+    date = new Date(value as string | number);
+  }
+  const diff = Date.now() - date.getTime();
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+}
 
 export default function ProfilePage() {
   const router = useRouter();
   const [profileTab, setProfileTab] = useState<ProfileTab>("overview");
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [events, setEvents] = useState<Event[]>(EVENTS.slice(0, 4));
+  const [recentActivity, setRecentActivity] = useState<ActivityItem[]>(RECENT_ACTIVITY);
   const { xp, streak, solvedChallenges, profile, updateProfile, showNotif } = useAppStore();
+  const { user, userProfile, refreshUserProfile } = useAuthContext();
   const { level, levelXp, levelTitle } = useLevel();
 
-  const handleSaveProfile = (data: typeof profile) => {
+  useEffect(() => {
+    getEvents({ limitCount: 10 })
+      .then((data) => {
+        const mapped = data.map((e) => mapEventToCardEvent(e));
+        setEvents(mapped.length ? mapped.slice(0, 4) : EVENTS.slice(0, 4));
+      })
+      .catch(() => setEvents(EVENTS.slice(0, 4)));
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setRecentActivity(RECENT_ACTIVITY);
+      return;
+    }
+
+    getUserActivity(user.uid)
+      .then((items) => {
+        if (!items.length) {
+          setRecentActivity(RECENT_ACTIVITY);
+          return;
+        }
+
+        const mapped: ActivityItem[] = items.slice(0, 6).map((item) => {
+          const activity = item as Record<string, unknown>;
+          const type = String(activity.type || "");
+          const description = String(activity.description || "Activity updated");
+          const icon =
+            type.includes("challenge") ? "✅" :
+            type.includes("team") ? "🤝" :
+            type.includes("badge") ? "🏆" : "⚡";
+          const sub = type ? type.replaceAll("_", " ") : "update";
+          return [icon, description, sub, formatTimeAgo(activity.createdAt), "#6C3BFF"] as const;
+        });
+
+        setRecentActivity(mapped);
+      })
+      .catch(() => setRecentActivity(RECENT_ACTIVITY));
+  }, [user]);
+
+  useEffect(() => {
+    if (!userProfile) return;
+
+    const parsedSkills = Array.isArray(userProfile.skills)
+      ? userProfile.skills.map((s) => (typeof s === "string" ? s : s.name)).filter(Boolean)
+      : [];
+
+    updateProfile({
+      name: userProfile.displayName || userProfile.name || "User",
+      college: userProfile.college || "",
+      branch: userProfile.branch || "CSE",
+      year: userProfile.year || "1st",
+      bio: userProfile.bio || "",
+      skills: parsedSkills,
+    });
+  }, [updateProfile, userProfile]);
+
+  const stats = useMemo(() => ({
+    xp: userProfile?.stats?.xp ?? xp,
+    solved: userProfile?.stats?.totalChallengesSolved ?? solvedChallenges.size,
+    streak: userProfile?.stats?.currentStreak ?? streak,
+    wins: userProfile?.stats?.eventsWon ?? 0,
+    teams: userProfile?.stats?.teamsFormed ?? 0,
+    easy: userProfile?.stats?.easyCount ?? 0,
+    medium: userProfile?.stats?.mediumCount ?? 0,
+    hard: userProfile?.stats?.hardCount ?? 0,
+  }), [streak, solvedChallenges.size, userProfile, xp]);
+
+  const handleSaveProfile = async (data: typeof profile) => {
     updateProfile(data);
+    if (user) {
+      await updateUserProfile(user.uid, {
+        displayName: data.name,
+        college: data.college,
+        branch: data.branch,
+        year: data.year,
+        bio: data.bio,
+        skills: data.skills,
+      }).catch(() => undefined);
+      refreshUserProfile();
+    }
     showNotif("✓ Profile updated successfully!", "success");
   };
 
@@ -132,11 +236,11 @@ export default function ProfilePage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginTop: 24 }}>
           {(
             [
-              ["⚡", xp, "XP"],
-              ["✅", solvedChallenges.size, "Solved"],
-              ["🔥", streak, "Streak"],
-              ["🏆", 3, "Events Won"],
-              ["👥", 2, "Teams"],
+              ["⚡", stats.xp, "XP"],
+              ["✅", stats.solved, "Solved"],
+              ["🔥", stats.streak, "Streak"],
+              ["🏆", stats.wins, "Events Won"],
+              ["👥", stats.teams, "Teams"],
             ] as const
           ).map(([icon, val, label]) => (
             <div key={label} style={{ textAlign: "center", background: "#16213E", borderRadius: 10, padding: 14 }}>
@@ -172,7 +276,7 @@ export default function ProfilePage() {
           {/* Problem Solving */}
           <div className="card" style={{ padding: 24 }}>
             <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Problem Solving</h3>
-            {([["Easy", "#10B981", 3, 150], ["Medium", "#F59E0B", 1, 80], ["Hard", "#EF4444", 0, 40]] as const).map(([d, color, solved, total]) => (
+            {([["Easy", "#10B981", stats.easy, 150], ["Medium", "#F59E0B", stats.medium, 80], ["Hard", "#EF4444", stats.hard, 40]] as const).map(([d, color, solved, total]) => (
               <div key={d} style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 14 }}>
                   <span style={{ color, fontWeight: 600 }}>{d}</span>
@@ -214,7 +318,7 @@ export default function ProfilePage() {
           <div className="card" style={{ padding: 24, gridColumn: "1/-1" }}>
             <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Recent Activity</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {RECENT_ACTIVITY.map(([icon, title, sub, time, color]) => (
+              {recentActivity.map(([icon, title, sub, time, color]) => (
                 <div key={title} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "#16213E", borderRadius: 8 }}>
                   <div style={{ width: 36, height: 36, borderRadius: 8, background: color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
                     {icon}
@@ -257,7 +361,7 @@ export default function ProfilePage() {
       {/* ── Events ── */}
       {profileTab === "events" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {EVENTS.slice(0, 4).map((ev) => (
+          {events.map((ev) => (
             <div
               key={ev.id}
               className="card"

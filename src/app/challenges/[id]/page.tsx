@@ -1,24 +1,126 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
 import { CHALLENGES } from "@/lib/data/challenges";
 import { SAMPLE_CODE } from "@/lib/data/constants";
 import { useAppStore } from "@/stores/useAppStore";
 import { useCodeRunner } from "@/hooks/useCodeRunner";
 import { difficultyColor, difficultyBg } from "@/lib/utils/difficulty";
+import { getChallengeById } from "@/lib/firebase/firestore";
+import { mapChallengeToListChallenge } from "@/lib/utils/firestoreMappers";
+import { logAnalyticsEvent } from "@/lib/analytics";
+import type { Challenge } from "@/types";
+import ShimmerCard from "@/components/shared/ShimmerCard";
 
 const LANGUAGES = ["JavaScript", "Python", "Java", "C++"];
+
+function starterCodeForLanguage(challenge: Challenge | null, language: string): string {
+  if (!challenge?.starterCode) return SAMPLE_CODE;
+  const key = language.toLowerCase();
+  return challenge.starterCode[key] || challenge.starterCode.javascript || SAMPLE_CODE;
+}
 
 export default function ChallengeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [code, setCode] = useState(SAMPLE_CODE);
+  const [challenge, setChallenge] = useState<Challenge | null>(null);
+  const [loading, setLoading] = useState(true);
   const [lang, setLang] = useState("JavaScript");
+  const [code, setCode] = useState(SAMPLE_CODE);
   const { solvedChallenges, markSolved, addXp, showNotif } = useAppStore();
   const { running, runResult, run, reset } = useCodeRunner();
 
-  const challenge = CHALLENGES.find((c) => c.id === id);
+  useEffect(() => {
+    let mounted = true;
+
+    getChallengeById(id)
+      .then((doc) => {
+        if (!mounted) return;
+        if (doc) {
+          setChallenge(mapChallengeToListChallenge(doc));
+          return;
+        }
+        setChallenge(CHALLENGES.find((c) => c.id === id) || null);
+      })
+      .catch(() => {
+        if (mounted) setChallenge(CHALLENGES.find((c) => c.id === id) || null);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    if (!loading && challenge) {
+      void logAnalyticsEvent("view_item", {
+        item_category: "challenge",
+        item_id: challenge.id,
+        difficulty: challenge.difficulty,
+      });
+    }
+  }, [challenge, loading]);
+
+  useEffect(() => {
+    setCode(starterCodeForLanguage(challenge, lang));
+  }, [challenge, lang]);
+
+  const examples = useMemo(() => {
+    if (challenge?.sampleTestCases?.length) {
+      return challenge.sampleTestCases.slice(0, 3).map((test, index) => ({
+        ex: index + 1,
+        input: test.input,
+        output: test.output,
+        explain: test.explanation,
+      }));
+    }
+
+    return [
+      { ex: 1, input: "nums = [2,7,11,15], target = 9", output: "[0,1]", explain: "Because nums[0] + nums[1] == 9, we return [0, 1]." },
+      { ex: 2, input: "nums = [3,2,4], target = 6", output: "[1,2]" },
+    ];
+  }, [challenge]);
+
+  const handleRun = (action: "run" | "submit") => {
+    if (!challenge) return;
+
+    void logAnalyticsEvent("challenge_code_execute", {
+      challenge_id: challenge.id,
+      action,
+      language: lang,
+    });
+
+    run(code, lang, () => {
+      const newlySolved = !solvedChallenges.has(challenge.id);
+      void logAnalyticsEvent("challenge_result", {
+        challenge_id: challenge.id,
+        action,
+        accepted: true,
+        newly_solved: newlySolved,
+      });
+      if (!solvedChallenges.has(challenge.id)) {
+        markSolved(challenge.id);
+        addXp(challenge.xpReward || 10);
+        showNotif(`✓ Accepted! +${challenge.xpReward || 10} XP earned`, "success");
+      } else {
+        showNotif("✓ All test cases passed!", "success");
+      }
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="fade-in" style={{ display: "grid", gap: 12 }}>
+        <ShimmerCard height={120} />
+        <ShimmerCard height={280} />
+        <ShimmerCard height={320} />
+      </div>
+    );
+  }
 
   if (!challenge) {
     return (
@@ -32,22 +134,8 @@ export default function ChallengeDetailPage() {
     );
   }
 
-  const handleRun = () => {
-    run(() => {
-      if (!solvedChallenges.has(challenge.id)) {
-        markSolved(challenge.id);
-        addXp(10);
-        showNotif("✓ Accepted! +10 XP earned", "success");
-      } else {
-        showNotif("✓ All test cases passed!", "success");
-      }
-    });
-  };
-
-  const examples = [
-    { ex: 1, input: "nums = [2,7,11,15], target = 9", output: "[0,1]", explain: "Because nums[0] + nums[1] == 9, we return [0, 1]." },
-    { ex: 2, input: "nums = [3,2,4], target = 6", output: "[1,2]" },
-  ];
+  const isSolved = solvedChallenges.has(challenge.id);
+  const outputStatusColor = runResult?.status === "accepted" ? "#10B981" : "#EF4444";
 
   return (
     <div className="fade-in">
@@ -56,7 +144,6 @@ export default function ChallengeDetailPage() {
       </button>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, minHeight: 600 }}>
-        {/* ── Problem Description ── */}
         <div>
           <div className="card" style={{ padding: 24, marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
@@ -84,25 +171,11 @@ export default function ChallengeDetailPage() {
 
             <div style={{ color: "#A0A0C0", lineHeight: 1.8, fontSize: 15 }}>
               <p style={{ marginBottom: 16 }}>
-                Given an array of integers{" "}
-                <code style={{ background: "#16213E", padding: "2px 6px", borderRadius: 4, color: "#8B5CF6", fontFamily: "'JetBrains Mono', monospace" }}>
-                  nums
-                </code>{" "}
-                and an integer{" "}
-                <code style={{ background: "#16213E", padding: "2px 6px", borderRadius: 4, color: "#8B5CF6", fontFamily: "'JetBrains Mono', monospace" }}>
-                  target
-                </code>
-                , return <em>indices of the two numbers such that they add up to target</em>.
+                {challenge.description || "Solve this challenge by writing an efficient algorithm. Use the examples and constraints below to validate your logic."}
               </p>
-              <p style={{ marginBottom: 16 }}>
-                You may assume that each input would have{" "}
-                <strong style={{ color: "#F0F0FF" }}>exactly one solution</strong>, and you may not use the same element twice.
-              </p>
-              <p>You can return the answer in any order.</p>
             </div>
           </div>
 
-          {/* Examples */}
           <div className="card" style={{ padding: 24, marginBottom: 16 }}>
             <h3 style={{ fontWeight: 700, marginBottom: 16, fontSize: 16 }}>Examples</h3>
             {examples.map((e) => (
@@ -135,22 +208,24 @@ export default function ChallengeDetailPage() {
             ))}
           </div>
 
-          {/* Constraints */}
           <div className="card" style={{ padding: 24 }}>
             <h3 style={{ fontWeight: 700, marginBottom: 12, fontSize: 16 }}>Constraints</h3>
             <ul style={{ color: "#8B8BAD", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, listStyle: "none", lineHeight: 2 }}>
-              <li>• 2 ≤ nums.length ≤ 10⁴</li>
-              <li>• -10⁹ ≤ nums[i] ≤ 10⁹</li>
-              <li>• -10⁹ ≤ target ≤ 10⁹</li>
-              <li>• Only one valid answer exists.</li>
+              {(challenge.constraints
+                ? challenge.constraints.split("\n").filter(Boolean)
+                : [
+                    "2 ≤ nums.length ≤ 10⁴",
+                    "-10⁹ ≤ nums[i], target ≤ 10⁹",
+                    "Only one valid answer exists",
+                  ]).map((line) => (
+                <li key={line}>• {line}</li>
+              ))}
             </ul>
           </div>
         </div>
 
-        {/* ── Code Editor ── */}
         <div>
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            {/* Editor Header */}
             <div
               style={{
                 display: "flex",
@@ -177,18 +252,17 @@ export default function ChallengeDetailPage() {
                 {LANGUAGES.map((l) => <option key={l}>{l}</option>)}
               </select>
 
-              {solvedChallenges.has(challenge.id) && (
+              {isSolved && (
                 <span style={{ fontSize: 12, color: "#10B981", fontWeight: 600 }}>✓ Solved</span>
               )}
 
               <div style={{ marginLeft: "auto" }}>
-                <button className="btn-ghost" style={{ fontSize: 12, padding: "5px 12px" }} onClick={() => setCode(SAMPLE_CODE)}>
+                <button className="btn-ghost" style={{ fontSize: 12, padding: "5px 12px" }} onClick={() => setCode(starterCodeForLanguage(challenge, lang))}>
                   Reset
                 </button>
               </div>
             </div>
 
-            {/* Code Area */}
             <textarea
               className="code-editor"
               value={code}
@@ -197,7 +271,6 @@ export default function ChallengeDetailPage() {
               spellCheck={false}
             />
 
-            {/* Spinner */}
             {running && (
               <div style={{ padding: 16, borderBottom: "1px solid #2D2D50", textAlign: "center" }}>
                 <div style={{ color: "#8B8BAD", fontSize: 14, display: "flex", alignItems: "center", gap: 10, justifyContent: "center" }}>
@@ -216,11 +289,12 @@ export default function ChallengeDetailPage() {
               </div>
             )}
 
-            {/* Test Results */}
             {runResult && (
               <div style={{ padding: 16, borderBottom: "1px solid #2D2D50" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                  <span style={{ fontWeight: 700, color: "#10B981", fontSize: 16 }}>✓ Accepted</span>
+                  <span style={{ fontWeight: 700, color: outputStatusColor, fontSize: 16 }}>
+                    {runResult.status === "accepted" ? "✓ Accepted" : `✗ ${runResult.status.replaceAll("_", " ")}`}
+                  </span>
                   <span style={{ fontSize: 13, color: "#8B8BAD" }}>Runtime: {runResult.runtime}</span>
                   <span style={{ fontSize: 13, color: "#8B8BAD" }}>Memory: {runResult.memory}</span>
                 </div>
@@ -241,7 +315,7 @@ export default function ChallengeDetailPage() {
                       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#8B8BAD" }}>
                         Case {i + 1}: {tc.input}
                       </span>
-                      <span style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#10B981" }}>
+                      <span style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: tc.pass ? "#10B981" : "#EF4444" }}>
                         → {tc.got}
                       </span>
                     </div>
@@ -250,12 +324,11 @@ export default function ChallengeDetailPage() {
               </div>
             )}
 
-            {/* Action Buttons */}
             <div style={{ display: "flex", gap: 10, padding: 16 }}>
-              <button className="btn-ghost" style={{ flex: 1 }} onClick={handleRun} disabled={running}>
+              <button className="btn-ghost" style={{ flex: 1 }} onClick={() => handleRun("run")} disabled={running}>
                 ▶ Run Code
               </button>
-              <button className="btn-primary" style={{ flex: 1 }} onClick={handleRun} disabled={running}>
+              <button className="btn-primary" style={{ flex: 1 }} onClick={() => handleRun("submit")} disabled={running}>
                 Submit Solution
               </button>
             </div>

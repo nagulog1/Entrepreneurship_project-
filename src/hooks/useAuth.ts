@@ -15,6 +15,7 @@ import {
   type User as FirebaseUser,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { logAnalyticsEvent } from '@/lib/analytics';
 import { auth, db } from '@/lib/firebase';
 import type { User } from '@/types';
 
@@ -157,10 +158,12 @@ export function useAuth() {
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
       await fetchUserProfile(result.user.uid);
+      await logAnalyticsEvent('login', { method: 'email' });
       return result;
     } catch (err) {
       const msg = friendlyError(err);
       setError(msg);
+      await logAnalyticsEvent('auth_error', { method: 'email_signin', message: msg });
       throw new Error(msg);
     }
   };
@@ -177,10 +180,12 @@ export function useAuth() {
       await sendEmailVerification(result.user);
       await createUserDocument(result.user, { displayName });
       await fetchUserProfile(result.user.uid);
+      await logAnalyticsEvent('sign_up', { method: 'email' });
       return result;
     } catch (err) {
       const msg = friendlyError(err);
       setError(msg);
+      await logAnalyticsEvent('auth_error', { method: 'email_signup', message: msg });
       throw new Error(msg);
     }
   };
@@ -195,10 +200,12 @@ export function useAuth() {
         await createUserDocument(result.user);
       }
       await fetchUserProfile(result.user.uid);
+      await logAnalyticsEvent('login', { method: 'google' });
       return result;
     } catch (err) {
       const msg = friendlyError(err);
       setError(msg);
+      await logAnalyticsEvent('auth_error', { method: 'google_signin', message: msg });
       throw new Error(msg);
     }
   };
@@ -213,15 +220,18 @@ export function useAuth() {
         await createUserDocument(result.user);
       }
       await fetchUserProfile(result.user.uid);
+      await logAnalyticsEvent('login', { method: 'github' });
       return result;
     } catch (err) {
       const msg = friendlyError(err);
       setError(msg);
+      await logAnalyticsEvent('auth_error', { method: 'github_signin', message: msg });
       throw new Error(msg);
     }
   };
 
   const signOut = async () => {
+    await logAnalyticsEvent('logout');
     await firebaseSignOut(auth);
     setUser(null);
     setUserProfile(null);
@@ -231,9 +241,11 @@ export function useAuth() {
     setError(null);
     try {
       await sendPasswordResetEmail(auth, email);
+      await logAnalyticsEvent('password_reset_request');
     } catch (err) {
       const msg = friendlyError(err);
       setError(msg);
+      await logAnalyticsEvent('auth_error', { method: 'password_reset', message: msg });
       throw new Error(msg);
     }
   };

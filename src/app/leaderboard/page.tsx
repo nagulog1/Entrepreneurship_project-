@@ -1,17 +1,48 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { USERS } from "@/lib/data/users";
 import { useAppStore } from "@/stores/useAppStore";
+import { getLeaderboard } from "@/lib/firebase/firestore";
+import { mapUserToLeaderboardUser } from "@/lib/utils/firestoreMappers";
+import type { User } from "@/types";
+import ShimmerCard from "@/components/shared/ShimmerCard";
 
-const PODIUM_ORDER = [USERS[1], USERS[0], USERS[2]]; // Silver, Gold, Bronze
 const PODIUM_HEIGHTS = [130, 180, 110];
 const PODIUM_MEDALS = ["🥈", "🥇", "🥉"];
-const PODIUM_RANKS = [2, 1, 3];
 
 export default function LeaderboardPage() {
   const router = useRouter();
   const { showNotif } = useAppStore();
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+
+    getLeaderboard(100)
+      .then((docs) => {
+        if (!mounted) return;
+        const mapped = docs.map((u) => mapUserToLeaderboardUser(u));
+        setUsers(mapped.length ? mapped : USERS);
+      })
+      .catch(() => {
+        if (mounted) setUsers(USERS);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const podium = useMemo(() => {
+    if (users.length < 3) return [];
+    return [users[1], users[0], users[2]];
+  }, [users]);
 
   return (
     <div className="fade-in">
@@ -25,7 +56,8 @@ export default function LeaderboardPage() {
 
       {/* ── Podium ── */}
       <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 32, alignItems: "flex-end" }}>
-        {PODIUM_ORDER.map((u, i) => (
+        {loading && [1, 2, 3].map((i) => <ShimmerCard key={i} height={180} />)}
+        {!loading && podium.map((u, i) => (
           <div key={u.id} style={{ textAlign: "center", width: 120 }}>
             <div
               className="avatar"
@@ -72,7 +104,7 @@ export default function LeaderboardPage() {
           ))}
         </div>
 
-        {USERS.map((u, i) => (
+        {!loading && users.map((u, i) => (
           <div
             key={u.id}
             className="leaderboard-row"
@@ -113,6 +145,9 @@ export default function LeaderboardPage() {
             </div>
           </div>
         ))}
+        {!loading && users.length === 0 && (
+          <div style={{ padding: 24, color: "#8B8BAD" }}>No leaderboard entries available.</div>
+        )}
       </div>
 
       {/* ── Your Rank ── */}
@@ -128,7 +163,7 @@ export default function LeaderboardPage() {
         }}
       >
         <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 20, color: "#6C3BFF" }}>
-          #4,218
+          #{users.length ? users.length.toLocaleString() : "—"}
         </div>
         <div>
           <div style={{ fontWeight: 600 }}>Your Global Rank</div>

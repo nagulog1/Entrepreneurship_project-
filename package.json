@@ -8,7 +8,13 @@
     "start": "next start",
     "lint": "next lint",
     "firebase:emulate": "firebase emulators:start",
-    "seed": "npx ts-node --project tsconfig.json scripts/seed-firebase.ts"
+    "firebase:emulate:hosting": "firebase emulators:start --only hosting,functions,firestore,auth,storage",
+    "firebase:deploy:hosting": "firebase deploy --only hosting",
+    "firebase:deploy:all": "firebase deploy",
+    "seed": "npx ts-node --project tsconfig.json scripts/seed-firebase.ts",
+    "functions:build": "npm --prefix functions run build",
+    "functions:serve": "npm --prefix functions run serve",
+    "functions:deploy": "npm --prefix functions run deploy"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.6.0",

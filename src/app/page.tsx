@@ -1,19 +1,72 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import EventCard from "@/components/events/EventCard";
 import { EVENTS } from "@/lib/data/events";
 import { USERS } from "@/lib/data/users";
 import { CHALLENGES } from "@/lib/data/challenges";
 import { useAppStore, useLevel } from "@/stores/useAppStore";
+import { getChallenges, getDailyChallenge, getEvents, getLeaderboard } from "@/lib/firebase/firestore";
+import { mapChallengeToListChallenge, mapEventToCardEvent, mapUserToLeaderboardUser } from "@/lib/utils/firestoreMappers";
+import type { Challenge, Event, User } from "@/types";
+import ShimmerCard from "@/components/shared/ShimmerCard";
 
 export default function HomePage() {
   const router = useRouter();
   const { xp, streak, solvedChallenges, bookmarked, toggleBookmark } = useAppStore();
   const { level, levelXp, levelTitle } = useLevel();
+  const [featuredEvents, setFeaturedEvents] = useState<Event[]>([]);
+  const [dailyChallenge, setDailyChallenge] = useState<Challenge>(CHALLENGES[1]);
+  const [topUsers, setTopUsers] = useState<User[]>(USERS.slice(0, 3));
+  const [loading, setLoading] = useState(true);
 
-  const featuredEvents = EVENTS.filter((e) => e.featured);
-  const dailyChallenge = CHALLENGES[1];
+  useEffect(() => {
+    let mounted = true;
+
+    Promise.all([
+      getEvents({ limitCount: 24 }),
+      getDailyChallenge(),
+      getChallenges({ limitCount: 8 }),
+      getLeaderboard(3),
+    ])
+      .then(([events, daily, challenges, users]) => {
+        if (!mounted) return;
+
+        const mappedEvents = events.map((e) => mapEventToCardEvent(e));
+        const featured = mappedEvents.filter((e) => e.featured).slice(0, 3);
+        setFeaturedEvents(featured.length ? featured : EVENTS.filter((e) => e.featured).slice(0, 3));
+
+        if (daily) {
+          setDailyChallenge(mapChallengeToListChallenge(daily));
+        } else if (challenges.length) {
+          setDailyChallenge(mapChallengeToListChallenge(challenges[0]));
+        }
+
+        const mappedUsers = users.map((u) => mapUserToLeaderboardUser(u));
+        setTopUsers(mappedUsers.length ? mappedUsers : USERS.slice(0, 3));
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setFeaturedEvents(EVENTS.filter((e) => e.featured).slice(0, 3));
+        setDailyChallenge(CHALLENGES[1]);
+        setTopUsers(USERS.slice(0, 3));
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const stats = useMemo(() => [
+    ["🎯", `${featuredEvents.length || 0}+`, "Featured Events"],
+    ["💻", `${dailyChallenge?.id ? 1 : 0}`, "Daily Challenge"],
+    ["👥", `${topUsers.length}+`, "Top Coders"],
+    ["🏆", "Live", "Firestore Connected"],
+  ] as const, [dailyChallenge?.id, featuredEvents.length, topUsers.length]);
 
   return (
     <div className="fade-in">
@@ -92,14 +145,7 @@ export default function HomePage() {
 
       {/* ── Stats Strip ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 32 }}>
-        {(
-          [
-            ["🎯", "1,200+", "Active Events"],
-            ["💻", "8,500+", "Challenges"],
-            ["👥", "2.4L+", "Students"],
-            ["🏆", "₹50Cr+", "Prize Pool"],
-          ] as const
-        ).map(([icon, val, label]) => (
+        {stats.map(([icon, val, label]) => (
           <div key={label} className="stat-card" style={{ textAlign: "center" }}>
             <div style={{ fontSize: 24, marginBottom: 8 }}>{icon}</div>
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 28, fontWeight: 700, color: "#F0F0FF", marginBottom: 4 }}>{val}</div>
@@ -115,6 +161,7 @@ export default function HomePage() {
           <button className="btn-ghost" onClick={() => router.push("/events")}>View All →</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+          {loading && [1, 2, 3].map((i) => <ShimmerCard key={i} height={230} />)}
           {featuredEvents.map((ev) => (
             <EventCard key={ev.id} ev={ev} bookmarked={bookmarked} onToggleBookmark={toggleBookmark} />
           ))}
@@ -184,7 +231,7 @@ export default function HomePage() {
           <button className="btn-ghost" onClick={() => router.push("/leaderboard")}>Full Leaderboard →</button>
         </div>
 
-        {USERS.slice(0, 3).map((u, i) => (
+        {topUsers.slice(0, 3).map((u, i) => (
           <div key={u.id} className="leaderboard-row">
             <div style={{ width: 28, textAlign: "center", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 16 }}>
               {["🥇", "🥈", "🥉"][i]}

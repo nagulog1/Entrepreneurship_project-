@@ -1,6 +1,7 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
+import { getFunctions, type Functions } from 'firebase/functions';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -18,12 +19,14 @@ let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
 let storage: FirebaseStorage;
+let functionsClient: Functions;
 
 try {
   app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
   auth = getAuth(app);
   db = getFirestore(app);
   storage = getStorage(app);
+  functionsClient = getFunctions(app);
 } catch (err) {
   console.warn('[Firebase] Initialization failed. Running in offline/static mode.', err);
   // Fallback stubs so imports never crash
@@ -31,9 +34,10 @@ try {
   auth = {} as Auth;
   db = {} as Firestore;
   storage = {} as FirebaseStorage;
+  functionsClient = {} as Functions;
 }
 
-export { app, auth, db, storage };
+export { app, auth, db, storage, functionsClient };
 
 export const getFirebaseAnalytics = async () => {
   if (typeof window === 'undefined') return null;

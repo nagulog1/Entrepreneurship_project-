@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAppStore, useLevel } from '@/stores/useAppStore';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { logAnalyticsEvent } from '@/lib/analytics';
 import AuthModal from '@/components/auth/AuthModal';
 
 const NAV_ITEMS = [
@@ -30,6 +31,7 @@ export default function Header() {
 
   const handleSignOut = async () => {
     setShowUserMenu(false);
+    await logAnalyticsEvent('menu_click', { item: 'sign_out' });
     await signOut();
     router.push('/');
   };
@@ -49,9 +51,9 @@ export default function Header() {
         <div
           className="notif"
           style={{
-            background: notification.type === 'success' ? '#10B98122' : '#EF444422',
-            border: `1px solid ${notification.type === 'success' ? '#10B98155' : '#EF444455'}`,
-            color: notification.type === 'success' ? '#10B981' : '#EF4444',
+            background: notification.type === 'success' ? '#052E2B' : '#3A1016',
+            border: `1px solid ${notification.type === 'success' ? '#10B98188' : '#EF444488'}`,
+            color: notification.type === 'success' ? '#E8FFF6' : '#FFECEE',
             cursor: 'pointer',
           }}
           onClick={clearNotif}
@@ -120,6 +122,13 @@ export default function Header() {
               key={href}
               href={href}
               className={`nav-item ${pathname === href ? 'active' : ''}`}
+              onClick={() => {
+                void logAnalyticsEvent('select_content', {
+                  content_type: 'navigation',
+                  content_id: href,
+                  content_label: label,
+                });
+              }}
             >
               {label}
             </Link>
@@ -223,7 +232,11 @@ export default function Header() {
                     ].map(({ label, href }) => (
                       <button
                         key={href}
-                        onClick={() => { setShowUserMenu(false); router.push(href); }}
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          void logAnalyticsEvent('menu_click', { item: href });
+                          router.push(href);
+                        }}
                         style={{
                           display: 'block',
                           width: '100%',
@@ -273,7 +286,10 @@ export default function Header() {
             <button
               className="btn-primary"
               style={{ padding: '7px 16px', fontSize: 13 }}
-              onClick={() => setShowAuthModal(true)}
+              onClick={() => {
+                void logAnalyticsEvent('auth_modal_open', { source: 'header' });
+                setShowAuthModal(true);
+              }}
             >
               Sign In
             </button>

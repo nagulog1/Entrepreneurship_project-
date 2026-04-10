@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import type { Event } from "@/types";
 import { difficultyColor, difficultyBg } from "@/lib/utils/difficulty";
+import { logAnalyticsEvent } from "@/lib/analytics";
 
 interface EventCardProps {
   ev: Event;
@@ -15,7 +16,10 @@ export default function EventCard({ ev, bookmarked, onToggleBookmark, large }: E
   const router = useRouter();
 
   return (
-    <div className="event-card" onClick={() => router.push(`/events/${ev.id}`)}>
+    <div className="event-card" onClick={() => {
+      void logAnalyticsEvent("select_content", { content_type: "event_card", content_id: ev.id, content_label: ev.title });
+      router.push(`/events/${ev.id}`);
+    }}>
       {ev.featured && (
         <div
           style={{
@@ -91,6 +95,7 @@ export default function EventCard({ ev, bookmarked, onToggleBookmark, large }: E
           style={{ flex: 1, padding: "8px", fontSize: 13 }}
           onClick={(e) => {
             e.stopPropagation();
+            void logAnalyticsEvent("event_view_details_click", { event_id: ev.id });
             router.push(`/events/${ev.id}`);
           }}
         >
@@ -101,6 +106,7 @@ export default function EventCard({ ev, bookmarked, onToggleBookmark, large }: E
           style={{ padding: "8px 12px", fontSize: 16 }}
           onClick={(e) => {
             e.stopPropagation();
+            void logAnalyticsEvent("event_bookmark_toggle", { event_id: ev.id, bookmarked_after: !bookmarked.has(ev.id) });
             onToggleBookmark(ev.id);
           }}
         >

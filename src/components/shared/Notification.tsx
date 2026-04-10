@@ -13,9 +13,9 @@ export default function Notification() {
     <div
       className="notif"
       style={{
-        background: isSuccess ? "#10B98122" : "#EF444422",
-        border: `1px solid ${isSuccess ? "#10B981" : "#EF4444"}`,
-        color: isSuccess ? "#10B981" : "#EF4444",
+        background: isSuccess ? "#052E2B" : "#3A1016",
+        border: `1px solid ${isSuccess ? "#10B98188" : "#EF444488"}`,
+        color: isSuccess ? "#E8FFF6" : "#FFECEE",
       }}
     >
       {notification.msg}
