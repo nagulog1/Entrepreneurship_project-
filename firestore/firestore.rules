@@ -1,0 +1,184 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // ── Field validation helpers ─────────────────────────────────────────────
+    function isValidString(field, maxLen) {
+      return field is string && field.size() <= maxLen;
+    }
+    function isValidEmail(field) {
+      return field is string && field.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+    function incomingData() { return request.resource.data; }
+    function existingData() { return resource.data; }
+
+    // ── Limit write size to prevent abuse ───────────────────────────────────
+    function writeSizeOk() {
+      return request.resource.size() < 1048576; // 1MB
+    }
+
+    // ── Users ───────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+                    && request.auth.uid == userId
+                    && writeSizeOk()
+                    && incomingData().uid == userId
+                    && isValidString(incomingData().displayName, 100)
+                    && isValidString(incomingData().email, 254);
+      allow update: if isOwner(userId)
+                    && writeSizeOk()
+                    // Prevent role escalation
+                    && (!('role' in incomingData()) || incomingData().role == existingData().role || isAdmin())
+                    // Prevent premium self-assignment
+                    && (!('isPremium' in incomingData()) || incomingData().isPremium == existingData().isPremium || isAdmin())
+                    && (!('premiumExpiresAt' in incomingData()) || isAdmin());
+      allow delete: if isOwner(userId) || isAdmin();
+
+      match /submissions/{s}  { allow read: if isOwner(userId); allow create: if isOwner(userId) && writeSizeOk(); allow update,delete: if false; }
+      match /bookmarks/{b}    { allow read,write: if isOwner(userId); }
+      match /notifications/{n}{ allow read,update: if isOwner(userId); allow create: if isSignedIn(); allow delete: if isOwner(userId); }
+      match /fcmTokens/{t}    { allow read,write: if isOwner(userId); }
+      match /activityFeed/{a} { allow read: if isSignedIn(); allow create,update,delete: if isOwner(userId); }
+      match /achievements/{a} { allow read: if isSignedIn(); allow write: if false; }
+    }
+
+    // ── Events ──────────────────────────────────────────────────────────────
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+                    && writeSizeOk()
+                    && isValidString(incomingData().title, 200)
+                    && incomingData().createdBy == request.auth.uid;
+      allow update: if (isAdmin() || existingData().createdBy == request.auth.uid)
+                    && writeSizeOk()
+                    // Cannot reassign createdBy
+                    && (!('createdBy' in incomingData()) || incomingData().createdBy == existingData().createdBy);
+      allow delete: if isAdmin();
+
+      match /registrations/{r} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+                      && incomingData().userId == request.auth.uid;
+        allow update: if isAdmin() || existingData().userId == request.auth.uid;
+        allow delete: if isAdmin() || existingData().userId == request.auth.uid;
+      }
+      match /reviews/{r} {
+        allow read: if true;
+        allow create: if isSignedIn()
+                      && incomingData().userId == request.auth.uid
+                      && isValidString(incomingData().review, 2000)
+                      && incomingData().rating is number
+                      && incomingData().rating >= 1
+                      && incomingData().rating <= 5;
+        allow update,delete: if existingData().userId == request.auth.uid || isAdmin();
+      }
+    }
+
+    // ── Challenges ──────────────────────────────────────────────────────────
+    match /challenges/{challengeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+      match /discussions/{d} {
+        allow read: if true;
+        allow create: if isSignedIn()
+                      && isValidString(incomingData().content, 5000)
+                      && incomingData().userId == request.auth.uid;
+        allow update,delete: if existingData().userId == request.auth.uid || isAdmin();
+        match /replies/{r} {
+          allow read: if true;
+          allow create: if isSignedIn()
+                        && isValidString(incomingData().content, 3000)
+                        && incomingData().userId == request.auth.uid;
+          allow update,delete: if existingData().userId == request.auth.uid || isAdmin();
+        }
+      }
+    }
+
+    // ── Teams ───────────────────────────────────────────────────────────────
+    match /teams/{teamId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+                    && writeSizeOk()
+                    && incomingData().createdBy == request.auth.uid
+                    && isValidString(incomingData().name, 100);
+      // Only team creator or admin can update team settings
+      allow update: if isSignedIn()
+                    && (existingData().createdBy == request.auth.uid || isAdmin())
+                    && writeSizeOk();
+      allow delete: if existingData().createdBy == request.auth.uid || isAdmin();
+
+      match /messages/{m} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+                      && incomingData().senderId == request.auth.uid
+                      && isValidString(incomingData().message, 5000);
+        allow update,delete: if existingData().senderId == request.auth.uid;
+      }
+      match /requests/{r} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+                      && incomingData().fromUserId == request.auth.uid;
+        allow update: if existingData().fromUserId == request.auth.uid
+                      || get(/databases/$(database)/documents/teams/$(teamId)).data.createdBy == request.auth.uid;
+      }
+      match /presence/{userId} { allow read: if isSignedIn(); allow write: if isOwner(userId); }
+      match /typing/{userId}   { allow read: if isSignedIn(); allow write: if isOwner(userId); }
+    }
+
+    // ── Team Requests ───────────────────────────────────────────────────────
+    match /teamRequests/{r} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+                    && incomingData().fromUserId == request.auth.uid
+                    && isValidString(incomingData().message, 1000);
+      allow update,delete: if existingData().fromUserId == request.auth.uid;
+    }
+
+    // ── Forum ───────────────────────────────────────────────────────────────
+    match /forumThreads/{t} {
+      allow read: if true;
+      allow create: if isSignedIn()
+                    && incomingData().authorId == request.auth.uid
+                    && isValidString(incomingData().title, 300)
+                    && isValidString(incomingData().content, 20000);
+      allow update: if existingData().authorId == request.auth.uid || isAdmin();
+      allow delete: if existingData().authorId == request.auth.uid || isAdmin();
+
+      match /replies/{r} {
+        allow read: if true;
+        allow create: if isSignedIn()
+                      && incomingData().authorId == request.auth.uid
+                      && isValidString(incomingData().content, 10000);
+        allow update,delete: if existingData().authorId == request.auth.uid || isAdmin();
+      }
+    }
+
+    // ── Read-only / Admin-only collections ──────────────────────────────────
+    match /badges/{b}         { allow read: if true; allow write: if isAdmin(); }
+    match /learningPaths/{p}  { allow read: if true; allow write: if isAdmin(); match /enrollments/{u} { allow read: if isSignedIn(); allow create,update: if isOwner(u); } }
+    match /contests/{c}       { allow read: if true; allow write: if isAdmin();
+      match /leaderboard/{u} { allow read: if true; allow write: if false; }
+      match /registrations/{r} { allow read: if isSignedIn(); allow create: if isSignedIn() && incomingData().userId == request.auth.uid; allow update,delete: if false; }
+      match /submissions/{s} { allow read: if isSignedIn(); allow create: if isSignedIn() && incomingData().userId == request.auth.uid; allow update,delete: if false; }
+    }
+    match /mentorships/{m} {
+      allow read: if isSignedIn() && (existingData().mentorId == request.auth.uid || existingData().menteeId == request.auth.uid);
+      allow create: if isSignedIn()
+                    && (incomingData().mentorId == request.auth.uid || incomingData().menteeId == request.auth.uid);
+      allow update: if isSignedIn() && (existingData().mentorId == request.auth.uid || existingData().menteeId == request.auth.uid);
+    }
+    match /subscriptions/{s}  { allow read: if isSignedIn() && existingData().userId == request.auth.uid; allow write: if false; }
+    match /orders/{o}         { allow read: if isSignedIn() && existingData().userId == request.auth.uid; allow write: if false; }
+    match /adminConfig/{c}    { allow read: if true; allow write: if isAdmin(); }
+    match /stats/{s}          { allow read: if true; allow write: if false; }
+    match /analytics/{d}      { allow read: if isAdmin(); allow write: if false; }
+  }
+}
