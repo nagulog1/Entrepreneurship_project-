@@ -13,13 +13,18 @@ import sgClient from "@sendgrid/client";
 
 let initialized = false;
 
-function ensureInit() {
-  if (initialized) return;
+/** Returns false when SendGrid is not configured — callers log and skip. */
+function ensureInit(): boolean {
+  if (initialized) return true;
   const apiKey = process.env.SENDGRID_API_KEY;
-  if (!apiKey) throw new Error("[emailService] SENDGRID_API_KEY is not set.");
+  if (!apiKey) {
+    // Dev mode: log to console instead of sending
+    return false;
+  }
   sgMail.setApiKey(apiKey);
   sgClient.setApiKey(apiKey);
   initialized = true;
+  return true;
 }
 
 const FROM = {
@@ -53,7 +58,16 @@ interface SendOptions {
 }
 
 async function sendTemplate(opts: SendOptions): Promise<void> {
-  ensureInit();
+  const ready = ensureInit();
+  if (!ready) {
+    // SendGrid not configured — log to console in dev mode
+    console.info('[emailService] DEV MODE — would send email:', {
+      to: opts.to,
+      templateId: opts.templateId,
+      data: opts.dynamicData,
+    });
+    return;
+  }
 
   const msg: Parameters<typeof sgMail.send>[0] = {
     to: opts.to,
