@@ -1,76 +1,60 @@
 ﻿/**
- * monitoring.ts — Sentry error monitoring + structured logging.
- * Sentry is fully optional — all functions degrade gracefully to
- * console.* when @sentry/nextjs is not installed or not configured.
+ * monitoring.ts
+ * Uses require() for Sentry so webpack doesn't statically analyze
+ * the import and fail at build time when @sentry/nextjs is not installed.
  */
 
 import type { User } from "@/types";
 
-// ── Sentry loader (never throws) ──────────────────────────────────────────────
-
-type SentryModule = typeof import("@sentry/nextjs");
-
-async function getSentry(): Promise<SentryModule | null> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getSentrySync(): any | null {
   try {
-    return await import("@sentry/nextjs");
+    // require() is ignored by webpack's static import analyzer
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require("@sentry/nextjs");
   } catch {
-    // Package not installed — silent fallback
     return null;
   }
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-
 export function initSentry(dsn: string, release?: string) {
-  getSentry().then((Sentry) => {
-    if (!Sentry || !dsn) return;
-    Sentry.init({
+  try {
+    const S = getSentrySync();
+    if (!S || !dsn) return;
+    S.init({
       dsn,
       release,
       environment: process.env.NODE_ENV,
       tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1.0,
-      beforeSend(event) {
-        if (event.user) delete event.user.ip_address;
-        if (event.exception?.values?.[0]?.value?.includes("ResizeObserver loop")) return null;
+      beforeSend(event: Record<string, unknown>) {
         return event;
       },
     });
-  }).catch(() => {});
+  } catch { /* ignore */ }
 }
-
-// ── User context ──────────────────────────────────────────────────────────────
 
 export async function setSentryUser(user: Pick<User, "id" | "name" | "email"> | null) {
-  const Sentry = await getSentry();
-  if (!Sentry) return;
-  if (user) {
-    Sentry.setUser({ id: user.id, username: user.name, email: user.email });
-  } else {
-    Sentry.setUser(null);
-  }
+  try {
+    const S = getSentrySync();
+    if (!S) return;
+    if (user) S.setUser({ id: user.id, username: user.name, email: user.email });
+    else S.setUser(null);
+  } catch { /* ignore */ }
 }
-
-// ── Error capture ─────────────────────────────────────────────────────────────
 
 export async function captureError(
   error: unknown,
   context?: Record<string, unknown>
 ): Promise<void> {
-  // Always log to console regardless of Sentry
   console.error("[error]", error, context ?? "");
-
   try {
-    const Sentry = await getSentry();
-    if (!Sentry) return;
-    Sentry.withScope((scope) => {
-      if (context) {
-        Object.entries(context).forEach(([k, v]) => scope.setExtra(k, v));
-      }
-      Sentry.captureException(error);
+    const S = getSentrySync();
+    if (!S) return;
+    S.withScope((scope: { setExtra: (k: string, v: unknown) => void }) => {
+      if (context) Object.entries(context).forEach(([k, v]) => scope.setExtra(k, v));
+      S.captureException(error);
     });
-  } catch {
-    // Never let monitoring crash the app
-  }
+  } catch { /* never crash */ }
 }
 
 export async function captureMessage(
@@ -79,56 +63,48 @@ export async function captureMessage(
   context?: Record<string, unknown>
 ): Promise<void> {
   try {
-    const Sentry = await getSentry();
-    if (!Sentry) return;
-    Sentry.withScope((scope) => {
-      if (context) {
-        Object.entries(context).forEach(([k, v]) => scope.setExtra(k, v));
-      }
-      Sentry.captureMessage(message, level);
+    const S = getSentrySync();
+    if (!S) return;
+    S.withScope((scope: { setExtra: (k: string, v: unknown) => void }) => {
+      if (context) Object.entries(context).forEach(([k, v]) => scope.setExtra(k, v));
+      S.captureMessage(message, level);
     });
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 }
-
-// ── Structured logger ─────────────────────────────────────────────────────────
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
 class Logger {
   constructor(private name: string) {}
 
-  private log(level: LogLevel, message: string, context?: Record<string, unknown>, error?: unknown) {
-    const prefix = `[${this.name}]`;
+  private log(level: LogLevel, msg: string, ctx?: Record<string, unknown>, err?: unknown) {
+    const p = `[${this.name}]`;
     switch (level) {
       case "debug":
-        if (process.env.NODE_ENV !== "production") console.debug(prefix, message, context ?? "");
+        if (process.env.NODE_ENV !== "production") console.debug(p, msg, ctx ?? "");
         break;
       case "info":
-        console.info(prefix, message, context ?? "");
+        console.info(p, msg, ctx ?? "");
         break;
       case "warn":
-        console.warn(prefix, message, context ?? "");
+        console.warn(p, msg, ctx ?? "");
         break;
       case "error":
-        console.error(prefix, message, error ?? "", context ?? "");
-        if (error) void captureError(error, { message, ...context });
+        console.error(p, msg, err ?? "", ctx ?? "");
+        if (err) void captureError(err, { msg, ...ctx });
         break;
     }
   }
 
   debug(msg: string, ctx?: Record<string, unknown>) { this.log("debug", msg, ctx); }
-  info (msg: string, ctx?: Record<string, unknown>) { this.log("info",  msg, ctx); }
-  warn (msg: string, ctx?: Record<string, unknown>) { this.log("warn",  msg, ctx); }
+  info(msg: string, ctx?: Record<string, unknown>) { this.log("info", msg, ctx); }
+  warn(msg: string, ctx?: Record<string, unknown>) { this.log("warn", msg, ctx); }
   error(msg: string, err?: unknown, ctx?: Record<string, unknown>) { this.log("error", msg, ctx, err); }
 }
 
 export function createLogger(name: string) {
   return new Logger(name);
 }
-
-// ── Performance ───────────────────────────────────────────────────────────────
 
 export async function trackPerformance(
   name: string,
@@ -137,29 +113,23 @@ export async function trackPerformance(
 ): Promise<unknown> {
   const start = Date.now();
   let span: { end(): void } | null = null;
-
   try {
-    const Sentry = await getSentry();
-    if (Sentry) {
-      span = Sentry.startInactiveSpan({ name, op: operation }) as typeof span;
-    }
-  } catch {
-    // Sentry span creation failed — continue without it
-  }
+    const S = getSentrySync();
+    if (S) span = S.startInactiveSpan({ name, op: operation });
+  } catch { /* continue without span */ }
 
   try {
     const result = await fn();
     span?.end();
-    const duration = Date.now() - start;
-    if (duration > 5000) console.warn(`[performance] Slow: ${name} took ${duration}ms`);
+    if (Date.now() - start > 5000) {
+      console.warn(`[perf] Slow: ${name} took ${Date.now() - start}ms`);
+    }
     return result;
   } catch (err) {
     span?.end();
     throw err;
   }
 }
-
-// ── Health check ──────────────────────────────────────────────────────────────
 
 export interface HealthStatus {
   status: "healthy" | "degraded" | "unhealthy";
@@ -171,7 +141,6 @@ export async function runHealthChecks(): Promise<HealthStatus> {
   const checks: HealthStatus["checks"] = {};
   let overall: HealthStatus["status"] = "healthy";
 
-  // Firestore
   try {
     const start = Date.now();
     const { getAdminDb } = await import("@/lib/firebase/firebaseAdmin");
@@ -182,15 +151,10 @@ export async function runHealthChecks(): Promise<HealthStatus> {
     overall = "unhealthy";
   }
 
-  // Redis
-  checks.redis = { ok: true }; // in-memory fallback always available
-
-  // SendGrid
+  checks.redis    = { ok: true };
   checks.sendgrid = { ok: !!process.env.SENDGRID_API_KEY };
   if (!checks.sendgrid.ok && overall === "healthy") overall = "degraded";
-
-  // Sentry
-  checks.sentry = { ok: !!(await getSentry()) };
+  checks.sentry   = { ok: !!getSentrySync() };
 
   return { status: overall, checks, timestamp: new Date().toISOString() };
 }

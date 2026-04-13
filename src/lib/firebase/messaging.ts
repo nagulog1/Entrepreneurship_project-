@@ -1,4 +1,10 @@
-﻿let _msg: unknown = null;
+﻿/**
+ * messaging.ts - Firebase Cloud Messaging
+ * All imports are lazy. No top-level Firebase references.
+ * Compatible with both configured and unconfigured Firebase.
+ */
+
+let _msg: unknown = null;
 
 export async function getFirebaseMessaging() {
   if (_msg) return _msg;
@@ -8,9 +14,17 @@ export async function getFirebaseMessaging() {
     const apps = getApps();
     if (!apps.length) return null;
     const { isSupported, getMessaging } = await import("firebase/messaging");
-    if (!(await isSupported().catch(() => false))) return null;
-    try { _msg = getMessaging(apps[0]); return _msg; } catch { return null; }
-  } catch { return null; }
+    const supported = await isSupported().catch(() => false);
+    if (!supported) return null;
+    try {
+      _msg = getMessaging(apps[0]);
+      return _msg;
+    } catch {
+      return null;
+    }
+  } catch {
+    return null;
+  }
 }
 
 export async function ensureNotificationPermission(): Promise<NotificationPermission> {
@@ -34,18 +48,21 @@ export async function registerFcmToken(userId?: string): Promise<string | null> 
   try {
     if ((await ensureNotificationPermission()) !== "granted") return null;
     const token = await getFcmToken();
-    if (!token || !userId) return token ?? null;
-    try {
-      const { getApps } = await import("firebase/app");
-      if (getApps().length) {
-        const { getFirestore, doc, setDoc, serverTimestamp } = await import("firebase/firestore");
-        await setDoc(
-          doc(getFirestore(getApps()[0]), "fcmTokens", userId),
-          { token, userId, updatedAt: serverTimestamp() },
-          { merge: true }
-        );
-      }
-    } catch { /* best-effort */ }
+    if (!token) return null;
+    if (userId) {
+      try {
+        const { getApps } = await import("firebase/app");
+        const apps = getApps();
+        if (apps.length) {
+          const { getFirestore, doc, setDoc, serverTimestamp } = await import("firebase/firestore");
+          await setDoc(
+            doc(getFirestore(apps[0]), "fcmTokens", userId),
+            { token, userId, updatedAt: serverTimestamp() },
+            { merge: true }
+          );
+        }
+      } catch { /* best-effort */ }
+    }
     return token;
   } catch { return null; }
 }
@@ -57,13 +74,10 @@ export async function onForegroundNotification(
     const m = await getFirebaseMessaging();
     if (!m) return () => {};
     const { onMessage } = await import("firebase/messaging");
-    return onMessage(
-      m as never,
-      (p) => handler({
-        title: p.notification?.title,
-        body: p.notification?.body,
-        data: p.data as Record<string, string>,
-      })
-    );
+    return onMessage(m as never, (p) => handler({
+      title: p.notification?.title,
+      body: p.notification?.body,
+      data: p.data as Record<string, string>,
+    }));
   } catch { return () => {}; }
 }

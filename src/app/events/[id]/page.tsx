@@ -1,4 +1,3 @@
-//src/app/events/[id]/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -9,6 +8,8 @@ import { difficultyColor, difficultyBg } from "@/lib/utils/difficulty";
 import { getEventById, getEvents, incrementEventViewCount } from "@/lib/firebase/firestore";
 import { mapEventToCardEvent } from "@/lib/utils/firestoreMappers";
 import { logAnalyticsEvent } from "@/lib/analytics";
+import { useAuthContext } from "@/contexts/AuthContext";
+import AuthModal from "@/components/auth/AuthModal";
 import type { Event } from "@/types";
 import ShimmerCard from "@/components/shared/ShimmerCard";
 
@@ -22,11 +23,17 @@ const DEFAULT_PRIZES = [
 export default function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { user } = useAuthContext();
   const { bookmarked, toggleBookmark, showNotif } = useAppStore();
 
-  const [eventData, setEventData] = useState<Event | null>(null);
+  const [eventData, setEventData]     = useState<Event | null>(null);
   const [similarEvents, setSimilarEvents] = useState<Event[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]         = useState(true);
+  const [showAuth, setShowAuth]       = useState(false);
+  const [registering, setRegistering] = useState(false);
+  const [registered, setRegistered]   = useState(false);
+
+  // ── Load event ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     let mounted = true;
@@ -34,13 +41,14 @@ export default function EventDetailPage() {
     Promise.all([getEventById(id), getEvents({ limitCount: 16 })])
       .then(([eventDoc, eventList]) => {
         if (!mounted) return;
-
-        const fallbackEvent = EVENTS.find((e) => e.id === id) || null;
-        const mappedEvent = eventDoc ? mapEventToCardEvent(eventDoc) : fallbackEvent;
-        setEventData(mappedEvent);
+        const fallback = EVENTS.find((e) => e.id === id) || null;
+        const mapped   = eventDoc ? mapEventToCardEvent(eventDoc) : fallback;
+        setEventData(mapped);
 
         const mappedList = eventList.map((e) => mapEventToCardEvent(e));
-        const combined = [...mappedList, ...EVENTS].filter((ev, idx, arr) => arr.findIndex((x) => x.id === ev.id) === idx);
+        const combined   = [...mappedList, ...EVENTS].filter(
+          (ev, idx, arr) => arr.findIndex((x) => x.id === ev.id) === idx
+        );
         setSimilarEvents(combined.filter((e) => e.id !== id).slice(0, 3));
       })
       .catch(() => {
@@ -48,28 +56,89 @@ export default function EventDetailPage() {
         setEventData(EVENTS.find((e) => e.id === id) || null);
         setSimilarEvents(EVENTS.filter((e) => e.id !== id).slice(0, 3));
       })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
+      .finally(() => { if (mounted) setLoading(false); });
 
     incrementEventViewCount(id).catch(() => undefined);
     void logAnalyticsEvent("view_item", { item_category: "event", item_id: id });
 
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [id]);
+
+  // ── Check if already registered ────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!user) return;
+    user.getIdToken().then((token) => {
+      fetch(`/api/events/${id}/register`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((r) => r.json())
+        .then((data: { registrations?: { eventId: string }[] }) => {
+          const regs = data.registrations || [];
+          setRegistered(regs.some((r) => r.eventId === id));
+        })
+        .catch(() => { /* ignore */ });
+    }).catch(() => { /* ignore */ });
+  }, [user, id]);
+
+  // ── Register handler ────────────────────────────────────────────────────────
+
+  const handleRegister = async () => {
+    if (!user) { setShowAuth(true); return; }
+    if (registered) { showNotif("You are already registered!", "info"); return; }
+
+    setRegistering(true);
+    try {
+      const token = await user.getIdToken();
+      const res   = await fetch(`/api/events/${id}/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      const data = await res.json() as { error?: string };
+
+      if (res.status === 409) {
+        setRegistered(true);
+        showNotif("You are already registered!", "info");
+        return;
+      }
+      if (!res.ok) {
+        showNotif(data.error || "Registration failed. Please try again.", "error");
+        return;
+      }
+
+      setRegistered(true);
+      void logAnalyticsEvent("event_registration_click", {
+        event_id: id,
+        event_title: eventData?.title || id,
+      });
+      showNotif("🎉 Successfully registered! Check your email for confirmation.");
+
+    } catch {
+      showNotif("Registration failed. Check your connection.", "error");
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  // ── Prize breakdown ─────────────────────────────────────────────────────────
 
   const prizes = useMemo(() => {
     if (eventData?.prizes?.breakdown?.length) {
-      return eventData.prizes.breakdown.map((p, index) => [
+      return eventData.prizes.breakdown.map((p, i) => [
         p.position,
-        `${new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(p.amount)} ${p.description ? `· ${p.description}` : ""}`,
-        ["#F59E0B", "#8B8BAD", "#CD7F32", "#6C3BFF"][index % 4],
+        `${new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(p.amount)}${p.description ? ` · ${p.description}` : ""}`,
+        ["#F59E0B", "#8B8BAD", "#CD7F32", "#6C3BFF"][i % 4],
       ] as const);
     }
     return DEFAULT_PRIZES;
   }, [eventData]);
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -95,33 +164,30 @@ export default function EventDetailPage() {
 
   const infoGrid = [
     ["📅", "Event Date", eventData.date],
-    ["⏰", "Deadline", eventData.deadline],
+    ["⏰", "Deadline",   eventData.deadline],
     ["💰", "Prize Pool", eventData.prize],
-    ["👥", "Team Size", eventData.teamSize],
-    ["📍", "Location", eventData.city],
+    ["👥", "Team Size",  eventData.teamSize],
+    ["📍", "Location",   eventData.city],
     ["👀", "Registered", eventData.registered.toLocaleString()],
   ] as const;
 
   return (
     <div className="fade-in">
+      {showAuth && <AuthModal isOpen onClose={() => setShowAuth(false)} />}
+
       <button className="btn-ghost" style={{ marginBottom: 20 }} onClick={() => router.push("/events")}>
         ← Back to Events
       </button>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 24 }}>
+        {/* ── Left ── */}
         <div>
-          <div
-            style={{
-              background: "linear-gradient(135deg, #1A0A3A, #0A1A2A)",
-              borderRadius: 16,
-              padding: "40px 32px",
-              marginBottom: 24,
-              border: "1px solid #2D2D50",
-              textAlign: "center",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
+          {/* Hero banner */}
+          <div style={{
+            background: "linear-gradient(135deg, #1A0A3A, #0A1A2A)",
+            borderRadius: 16, padding: "40px 32px", marginBottom: 24,
+            border: "1px solid #2D2D50", textAlign: "center", position: "relative", overflow: "hidden",
+          }}>
             <div style={{ position: "absolute", top: -30, left: -30, width: 150, height: 150, background: "#6C3BFF22", borderRadius: "50%", filter: "blur(40px)" }} />
             <div style={{ fontSize: 64, marginBottom: 16 }}>{eventData.banner}</div>
             <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 30, fontWeight: 700, marginBottom: 8 }}>{eventData.title}</h1>
@@ -136,6 +202,7 @@ export default function EventDetailPage() {
             </div>
           </div>
 
+          {/* Info grid */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
             {infoGrid.map(([icon, label, val]) => (
               <div key={label} className="stat-card">
@@ -146,29 +213,24 @@ export default function EventDetailPage() {
             ))}
           </div>
 
+          {/* About */}
           <div className="card" style={{ padding: 24, marginBottom: 16 }}>
             <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 700, marginBottom: 16 }}>About this Event</h3>
             <p style={{ color: "#A0A0C0", lineHeight: 1.8 }}>
-              {eventData.description || "This event is now live on Firestore. Add a detailed description in the event document to enrich this section for participants."}
+              {eventData.description || "Join this exciting event and compete with talented developers from across India."}
             </p>
           </div>
 
+          {/* Prizes */}
           <div className="card" style={{ padding: 24 }}>
             <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 700, marginBottom: 16 }}>🏆 Prize Breakdown</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {prizes.map(([pos, val, color]) => (
-                <div
-                  key={pos}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "12px 16px",
-                    background: "#16213E",
-                    borderRadius: 8,
-                    border: `1px solid ${color}33`,
-                  }}
-                >
+                <div key={pos} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "12px 16px", background: "#16213E", borderRadius: 8,
+                  border: `1px solid ${color}33`,
+                }}>
                   <span style={{ fontWeight: 600, color }}>{pos}</span>
                   <span style={{ color: "#A0A0C0", fontSize: 14 }}>{val}</span>
                 </div>
@@ -177,37 +239,40 @@ export default function EventDetailPage() {
           </div>
         </div>
 
+        {/* ── Right (sticky sidebar) ── */}
         <div>
           <div className="card" style={{ padding: 20, marginBottom: 16, position: "sticky", top: 80 }}>
+
+            {/* Registration button */}
             <button
               className="btn-primary"
-              style={{ width: "100%", padding: "14px", fontSize: 16, marginBottom: 12 }}
-              onClick={() => {
-                void logAnalyticsEvent("event_registration_click", { event_id: eventData.id, event_title: eventData.title });
-                showNotif("🎉 Successfully registered! Check your email.");
-              }}
+              style={{ width: "100%", padding: "14px", fontSize: 16, marginBottom: 12,
+                       background: registered ? "#10B981" : undefined,
+                       opacity: registering ? 0.7 : 1 }}
+              onClick={handleRegister}
+              disabled={registering || registered}
             >
-              Register Now
+              {registered    ? "✓ Registered!"
+               : registering ? "Registering..."
+               : "Register Now"}
             </button>
+
             <button
               className="btn-outline"
               style={{ width: "100%", marginBottom: 12 }}
               onClick={() => {
                 void logAnalyticsEvent("event_find_teammates_click", { event_id: eventData.id });
-                router.push("/teams");
+                router.push(`/teams?eventId=${eventData.id}`);
               }}
             >
               🤝 Find Teammates
             </button>
+
             <button
               className="btn-ghost"
               style={{ width: "100%", marginBottom: 16 }}
               onClick={() => {
                 toggleBookmark(eventData.id);
-                void logAnalyticsEvent("event_bookmark_toggle", {
-                  event_id: eventData.id,
-                  bookmarked_after: !bookmarked.has(eventData.id),
-                });
                 showNotif(bookmarked.has(eventData.id) ? "Bookmark removed" : "Event bookmarked!");
               }}
             >
@@ -216,39 +281,23 @@ export default function EventDetailPage() {
 
             <div style={{ borderTop: "1px solid #2D2D50", paddingTop: 16 }}>
               <div style={{ fontSize: 12, color: "#8B8BAD", marginBottom: 12, fontWeight: 600, textTransform: "uppercase" }}>Quick Prep</div>
-              <button
-                className="btn-ghost"
-                style={{ width: "100%", marginBottom: 8 }}
-                onClick={() => {
-                  void logAnalyticsEvent("event_practice_click", { event_id: eventData.id });
-                  router.push("/challenges");
-                }}
-              >
+              <button className="btn-ghost" style={{ width: "100%", marginBottom: 8 }} onClick={() => router.push("/challenges")}>
                 ⚡ Practice Related Challenges
               </button>
-              <button
-                className="btn-ghost"
-                style={{ width: "100%" }}
-                onClick={() => {
-                  void logAnalyticsEvent("event_add_calendar_click", { event_id: eventData.id });
-                  showNotif("Added to Google Calendar!");
-                }}
-              >
+              <button className="btn-ghost" style={{ width: "100%" }} onClick={() => showNotif("Added to Google Calendar!")}>
                 📅 Add to Calendar
               </button>
             </div>
           </div>
 
+          {/* Similar events */}
           <div className="card" style={{ padding: 20 }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: "#8B8BAD" }}>SIMILAR EVENTS</div>
             {similarEvents.map((se) => (
               <div
                 key={se.id}
                 style={{ display: "flex", gap: 12, padding: "10px 0", borderBottom: "1px solid #1E1E35", cursor: "pointer" }}
-                onClick={() => {
-                  void logAnalyticsEvent("event_similar_click", { source_event_id: eventData.id, target_event_id: se.id });
-                  router.push(`/events/${se.id}`);
-                }}
+                onClick={() => router.push(`/events/${se.id}`)}
               >
                 <div style={{ fontSize: 24 }}>{se.banner}</div>
                 <div>
