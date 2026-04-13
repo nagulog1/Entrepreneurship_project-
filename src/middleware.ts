@@ -1,5 +1,5 @@
-/**
- * middleware.ts — Next.js edge middleware.
+﻿/**
+ * middleware.ts â€” Next.js edge middleware.
  * - Security headers on all responses
  * - Auth protection for private routes
  * - Basic abuse protection (bot detection)
@@ -11,10 +11,8 @@ import { NextRequest, NextResponse } from "next/server";
 const PROTECTED_ROUTES = [
   "/dashboard",
   "/settings",
-  "/teams",
-  "/api/events",
-  "/api/teams",
-  "/api/payments",
+  // /teams is public â€” auth prompt shown inline on the page itself
+  // API routes are protected by verifyIdToken() inside each handler
 ];
 
 // Routes that must NOT be cached
@@ -24,7 +22,7 @@ export function middleware(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   const response = NextResponse.next();
 
-  // ── Security Headers ─────────────────────────────────────────────────────────
+  // â”€â”€ Security Headers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
@@ -57,13 +55,13 @@ export function middleware(request: NextRequest): NextResponse {
     );
   }
 
-  // ── No-Cache for API routes ──────────────────────────────────────────────────
+  // â”€â”€ No-Cache for API routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   if (NO_CACHE_ROUTES.some((r) => pathname.startsWith(r))) {
     response.headers.set("Cache-Control", "no-store");
   }
 
-  // ── Bot / Abuse Detection ────────────────────────────────────────────────────
+  // â”€â”€ Bot / Abuse Detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const userAgent = request.headers.get("user-agent") || "";
   const isSuspiciousBot =
@@ -77,7 +75,7 @@ export function middleware(request: NextRequest): NextResponse {
     );
   }
 
-  // ── Auth Protection (Token-based check via cookie) ───────────────────────────
+  // â”€â”€ Auth Protection (Token-based check via cookie) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Note: Full token verification happens in the API routes themselves via
   // verifyIdToken(). Middleware only does a lightweight cookie presence check.
 
@@ -94,7 +92,7 @@ export function middleware(request: NextRequest): NextResponse {
     }
   }
 
-  // ── CORS for API routes ──────────────────────────────────────────────────────
+  // â”€â”€ CORS for API routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   if (isApiRoute) {
     const origin = request.headers.get("origin");
@@ -121,3 +119,4 @@ export const config = {
     "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf|otf)).*)",
   ],
 };
+
