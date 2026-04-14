@@ -4,11 +4,19 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { EVENTS } from "@/lib/data/events";
 import { useAppStore } from "@/stores/useAppStore";
+import { useAuthContext } from "@/contexts/AuthContext";
 import { difficultyColor, difficultyBg } from "@/lib/utils/difficulty";
-import { getEventById, getEvents, incrementEventViewCount } from "@/lib/firebase/firestore";
+import {
+  getEventById,
+  getEvents,
+  incrementEventViewCount,
+  registerForEvent,
+  checkEventRegistration,
+  getUserTeams,
+} from "@/lib/firebase/firestore";
 import { mapEventToCardEvent } from "@/lib/utils/firestoreMappers";
 import { logAnalyticsEvent } from "@/lib/analytics";
-import type { Event } from "@/types";
+import type { Event, Team } from "@/types";
 import ShimmerCard from "@/components/shared/ShimmerCard";
 
 const DEFAULT_PRIZES = [
@@ -22,10 +30,15 @@ export default function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { bookmarked, toggleBookmark, showNotif } = useAppStore();
+  const { user } = useAuthContext();
 
   const [eventData, setEventData] = useState<Event | null>(null);
   const [similarEvents, setSimilarEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userTeams, setUserTeams] = useState<Team[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<string>("");
+  const [isRegistered, setIsRegistered] = useState(false);
+  const [registering, setRegistering] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -35,7 +48,9 @@ export default function EventDetailPage() {
         if (!mounted) return;
 
         const fallbackEvent = EVENTS.find((e) => e.id === id) || null;
-        const mappedEvent = eventDoc ? mapEventToCardEvent(eventDoc) : fallbackEvent;
+        const mappedEvent = eventDoc
+          ? mapEventToCardEvent({ ...(fallbackEvent ?? {}), ...eventDoc } as Parameters<typeof mapEventToCardEvent>[0])
+          : fallbackEvent;
         setEventData(mappedEvent);
 
         const mappedList = eventList.map((e) => mapEventToCardEvent(e));
@@ -58,6 +73,35 @@ export default function EventDetailPage() {
       mounted = false;
     };
   }, [id]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!user || !eventData) return;
+
+    const loadUserRegistrationState = async () => {
+      try {
+        const [registered, teams] = await Promise.all([
+          checkEventRegistration(eventData.id, user.uid),
+          getUserTeams(user.uid),
+        ]);
+
+        if (!mounted) return;
+        setIsRegistered(registered);
+        setUserTeams(teams);
+        if (!selectedTeamId && teams.length > 0) {
+          setSelectedTeamId(teams[0].id);
+        }
+      } catch {
+        if (!mounted) return;
+        setUserTeams([]);
+      }
+    };
+
+    void loadUserRegistrationState();
+    return () => {
+      mounted = false;
+    };
+  }, [user, eventData]);
 
   const prizes = useMemo(() => {
     if (eventData?.prizes?.breakdown?.length) {
@@ -181,13 +225,77 @@ export default function EventDetailPage() {
             <button
               className="btn-primary"
               style={{ width: "100%", padding: "14px", fontSize: 16, marginBottom: 12 }}
-              onClick={() => {
-                void logAnalyticsEvent("event_registration_click", { event_id: eventData.id, event_title: eventData.title });
-                showNotif("🎉 Successfully registered! Check your email.");
+              onClick={async () => {
+                if (!user) {
+                  showNotif("Please sign in before registering.", "error");
+                  return;
+                }
+                if (isRegistered) {
+                  showNotif("You are already registered for this event.", "success");
+                  return;
+                }
+
+                setRegistering(true);
+                try {
+                  console.log("Registering for event:", {
+                    eventId: eventData.id,
+                    userId: user.uid,
+                    selectedTeamId,
+                  });
+                  await registerForEvent(eventData.id, user.uid, selectedTeamId || undefined);
+                  setIsRegistered(true);
+                  setEventData((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          registrationCount: (prev.registrationCount ?? prev.registered ?? 0) + 1,
+                        }
+                      : prev
+                  );
+                  showNotif(`🎉 Registered successfully${selectedTeamId ? " with your team." : "."}`);
+                  void logAnalyticsEvent("event_registration_click", {
+                    event_id: eventData.id,
+                    event_title: eventData.title,
+                    team_id: selectedTeamId || "solo",
+                  });
+                } catch (err) {
+                  console.error("Registration error:", err);
+                  if (err instanceof Error) {
+                    showNotif(`Registration failed: ${err.message}`, "error");
+                  } else {
+                    showNotif("Registration failed. Please try again.", "error");
+                  }
+                } finally {
+                  setRegistering(false);
+                }
               }}
+              disabled={registering || isRegistered}
             >
-              Register Now
+              {isRegistered ? "Registered" : registering ? "Registering..." : "Register Now"}
             </button>
+
+            {userTeams.length > 0 && (
+              <div style={{ marginBottom: 12, color: "#A0A0C0", fontSize: 14 }}>
+                <label htmlFor="teamSelect" style={{ display: "block", marginBottom: 8 }}>
+                  Choose a team for registration
+                </label>
+                <select
+                  id="teamSelect"
+                  className="input"
+                  style={{ width: "100%" }}
+                  value={selectedTeamId}
+                  onChange={(e) => setSelectedTeamId(e.target.value)}
+                >
+                  <option value="">Register without a team</option>
+                  {userTeams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <button
               className="btn-outline"
               style={{ width: "100%", marginBottom: 12 }}

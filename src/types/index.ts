@@ -216,6 +216,7 @@ export interface Team {
   description: string;
   createdBy: string;
   members: Array<{ userId: string; role: string; joinedAt: Timestamp }>;
+  memberIds?: string[];
   maxMembers: number;
   skills: string[];
   linkedEvents: string[];
@@ -354,6 +355,18 @@ export interface Submission {
 
 export interface EventRegistration {
   id?: string;
+  userId: string;
+  eventId: string;
+  eventTitle: string;
+  teamId: string | null;
+  registeredAt: Timestamp;
+  status: 'registered' | 'attended' | 'submitted' | 'winner';
+}
+
+export interface StudentRegistration {
+  id?: string;
+  eventId: string;
+  eventTitle: string;
   userId: string;
   teamId: string | null;
   registeredAt: Timestamp;

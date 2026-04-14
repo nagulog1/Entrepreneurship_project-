@@ -102,23 +102,50 @@ export async function registerForEvent(
   userId: string,
   teamId?: string
 ): Promise<void> {
+  // Fetch event details for context
+  const eventRef = doc(db, 'events', eventId);
+  const eventSnap = await getDoc(eventRef);
+  const eventData = eventSnap.exists() ? eventSnap.data() : null;
+  const eventTitle = eventData?.title || eventId;
+
   const regRef = doc(db, 'events', eventId, 'registrations', userId);
+  const studentRegRef = doc(db, 'studentRegistrations', `${userId}_${eventId}`);
+
   await setDoc(regRef, {
+    userId,
+    eventId,
+    eventTitle,
+    teamId: teamId ?? null,
+    registeredAt: serverTimestamp(),
+    status: 'registered',
+  });
+
+  await setDoc(studentRegRef, {
+    eventId,
+    eventTitle,
     userId,
     teamId: teamId ?? null,
     registeredAt: serverTimestamp(),
     status: 'registered',
   });
-  await updateDoc(doc(db, 'events', eventId), {
-    registrationCount: increment(1),
-  });
+
+  // Use setDoc with merge to upsert the event doc if it doesn't exist
+  await setDoc(
+    eventRef,
+    { registrationCount: increment(1) },
+    { merge: true }
+  );
 }
 
 export async function unregisterFromEvent(eventId: string, userId: string): Promise<void> {
   await deleteDoc(doc(db, 'events', eventId, 'registrations', userId));
-  await updateDoc(doc(db, 'events', eventId), {
-    registrationCount: increment(-1),
-  });
+  await deleteDoc(doc(db, 'studentRegistrations', `${userId}_${eventId}`));
+  // Use setDoc with merge to safely decrement even if doc is missing
+  await setDoc(
+    doc(db, 'events', eventId),
+    { registrationCount: increment(-1) },
+    { merge: true }
+  );
 }
 
 export async function checkEventRegistration(
@@ -194,7 +221,11 @@ export async function getUserBookmarks(userId: string): Promise<string[]> {
 
 export async function incrementEventViewCount(eventId: string): Promise<void> {
   try {
-    await updateDoc(doc(db, 'events', eventId), { viewCount: increment(1) });
+    await setDoc(
+      doc(db, 'events', eventId),
+      { viewCount: increment(1) },
+      { merge: true }
+    );
   } catch {}
 }
 
@@ -434,6 +465,7 @@ export async function createTeam(
     ...data,
     createdBy: userId,
     members: [{ userId, role: 'leader', joinedAt: serverTimestamp() }],
+    memberIds: [userId],
     status: 'forming',
     chat: true,
     createdAt: serverTimestamp(),
@@ -455,7 +487,7 @@ export async function getUserTeams(userId: string): Promise<Team[]> {
   try {
     const q = query(
       collection(db, 'teams'),
-      where('members', 'array-contains', userId),
+      where('memberIds', 'array-contains', userId),
       limit(10)
     );
     const snap = await getDocs(q);
@@ -465,9 +497,27 @@ export async function getUserTeams(userId: string): Promise<Team[]> {
   }
 }
 
+export async function getOpenTeams(limitCount = 20): Promise<Team[]> {
+  try {
+    const q = query(
+      collection(db, 'teams'),
+      where('status', '==', 'forming'),
+      limit(limitCount)
+    );
+    const snap = await getDocs(q);
+    return safeDocs<Team>(snap);
+  } catch {
+    return [];
+  }
+}
+
 export async function joinTeam(teamId: string, userId: string): Promise<void> {
+  // serverTimestamp() is not allowed inside arrayUnion object elements,
+  // so we use Timestamp.now() (client-side) for the joinedAt field.
+  const { Timestamp } = await import('firebase/firestore');
   await updateDoc(doc(db, 'teams', teamId), {
-    members: arrayUnion({ userId, role: 'member', joinedAt: serverTimestamp() }),
+    members: arrayUnion({ userId, role: 'member', joinedAt: Timestamp.now() }),
+    memberIds: arrayUnion(userId),
     updatedAt: serverTimestamp(),
   });
 }
@@ -476,8 +526,10 @@ export async function leaveTeam(teamId: string, userId: string): Promise<void> {
   const team = await getTeamById(teamId);
   if (!team) return;
   const newMembers = team.members.filter((m) => m.userId !== userId);
+  const newMemberIds = (team.memberIds ?? team.members.map((m) => m.userId)).filter((id) => id !== userId);
   await updateDoc(doc(db, 'teams', teamId), {
     members: newMembers,
+    memberIds: newMemberIds,
     updatedAt: serverTimestamp(),
   });
 }

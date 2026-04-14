@@ -10,6 +10,7 @@ interface Profile {
   year: string;
   skills: string[];
   bio: string;
+  avatar?: string;
   socialLinks?: {
     github?: string;
     linkedin?: string;

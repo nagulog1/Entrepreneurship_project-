@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "firebase:emulate": "firebase emulators:start",
+    "firebase:emulate": "set \"JAVA_HOME=C:\\Program Files\\Microsoft\\jdk-21.0.10.7-hotspot\" && set \"PATH=%JAVA_HOME%\\bin;%PATH%\" && firebase emulators:start",
     "firebase:emulate:hosting": "firebase emulators:start --only hosting,functions,firestore,auth,storage",
     "firebase:deploy:hosting": "firebase deploy --only hosting",
     "firebase:deploy:all": "firebase deploy",
@@ -17,7 +17,8 @@
     "functions:deploy": "npm --prefix functions run deploy",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "firebase:schema": "npx ts-node --project tsconfig.json scripts/create-firestore-schema.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.6.0",
@@ -28,8 +29,8 @@
     "framer-motion": "^11.2.10",
     "lucide-react": "^0.390.0",
     "next": "^14.2.35",
-    "react": "^18",
-    "react-dom": "^18",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "react-hook-form": "^7.51.5",
     "react-hot-toast": "^2.4.1",
     "react-markdown": "^9.0.1",

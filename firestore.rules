@@ -82,6 +82,17 @@ service cloud.firestore {
       }
     }
 
+    match /studentRegistrations/{registrationId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn()
+                    && incomingData().userId == request.auth.uid
+                    && incomingData().eventId is string
+                    && (incomingData().teamId is string || incomingData().teamId == null)
+                    && writeSizeOk();
+      allow update: if isSignedIn() && existingData().userId == request.auth.uid;
+      allow delete: if isSignedIn() && existingData().userId == request.auth.uid;
+    }
+
     // ── Challenges ──────────────────────────────────────────────────────────
     match /challenges/{challengeId} {
       allow read: if true;

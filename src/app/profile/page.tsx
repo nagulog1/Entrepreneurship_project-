@@ -112,6 +112,8 @@ export default function ProfilePage() {
       year: userProfile.year || "1st",
       bio: userProfile.bio || "",
       skills: parsedSkills,
+      // Only overwrite avatar if Firestore actually has one saved
+      ...(userProfile.avatar ? { avatar: userProfile.avatar } : {}),
     });
   }, [updateProfile, userProfile]);
 
@@ -136,6 +138,7 @@ export default function ProfilePage() {
         year: data.year,
         bio: data.bio,
         skills: data.skills,
+        avatar: data.avatar ?? "",
       }).catch(() => undefined);
       refreshUserProfile();
     }
@@ -179,21 +182,52 @@ export default function ProfilePage() {
         />
 
         <div style={{ display: "flex", gap: 20, alignItems: "flex-start", position: "relative" }}>
-          <div
-            style={{
-              width: 80,
-              height: 80,
-              borderRadius: "50%",
-              background: "linear-gradient(135deg, #6C3BFF, #8B5CF6)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 28,
-              fontWeight: 700,
-              border: "3px solid #6C3BFF55",
-            }}
-          >
-            {profile.name.charAt(0)}
+          {/* Avatar */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            <div
+              onClick={() => setIsEditModalOpen(true)}
+              style={{
+                width: 80,
+                height: 80,
+                borderRadius: "50%",
+                background: "linear-gradient(135deg, #6C3BFF, #8B5CF6)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: profile.avatar ? 36 : 28,
+                fontWeight: 700,
+                border: "3px solid #6C3BFF55",
+                cursor: "pointer",
+                position: "relative",
+              }}
+              title="Click to change avatar"
+            >
+              {profile.avatar || profile.name.charAt(0)}
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  right: 0,
+                  width: 22,
+                  height: 22,
+                  background: "#6C3BFF",
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  border: "2px solid #0D0D1A",
+                }}
+              >
+                ✏️
+              </div>
+            </div>
+            <span
+              onClick={() => setIsEditModalOpen(true)}
+              style={{ fontSize: 11, color: "#6C3BFF", cursor: "pointer", fontWeight: 500 }}
+            >
+              Change
+            </span>
           </div>
 
           <div style={{ flex: 1 }}>
