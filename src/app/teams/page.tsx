@@ -2,38 +2,48 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { TEAMMATES } from "@/lib/data/users";
-import { useAppStore } from "@/stores/useAppStore";
+import ShimmerCard from "@/components/shared/ShimmerCard";
 import { useAuthContext } from "@/contexts/AuthContext";
+import { useAppStore } from "@/stores/useAppStore";
+import { logAnalyticsEvent } from "@/lib/analytics";
 import {
-  getLeaderboard,
-  getUserTeams,
   createTeam,
+  getLeaderboard,
+  getOpenTeams,
+  getUserTeams,
   joinTeam,
   leaveTeam,
-  getOpenTeams,
+  updateTeam,
 } from "@/lib/firebase/firestore";
 import { mapUserToTeammate } from "@/lib/utils/firestoreMappers";
-import { logAnalyticsEvent } from "@/lib/analytics";
 import type { Team, Teammate } from "@/types";
-import ShimmerCard from "@/components/shared/ShimmerCard";
 
-// ─── Create Team Modal ─────────────────────────────────────────────────────────
+type TeamModalMode = "create" | "edit";
 
-function CreateTeamModal({
+function TeamModal({
+  mode,
+  team,
   onClose,
   onCreated,
+  onUpdated,
 }: {
+  mode: TeamModalMode;
+  team?: Team;
   onClose: () => void;
   onCreated: (team: Team) => void;
+  onUpdated: (team: Team) => void;
 }) {
   const { user } = useAuthContext();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [maxMembers, setMaxMembers] = useState(4);
+  const [name, setName] = useState(team?.name ?? "");
+  const [description, setDescription] = useState(team?.description ?? "");
+  const [maxMembers, setMaxMembers] = useState(team?.maxMembers ?? 4);
   const [skillInput, setSkillInput] = useState("");
-  const [skills, setSkills] = useState<string[]>([]);
+  const [skills, setSkills] = useState<string[]>(team?.skills ?? []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  const isEditMode = mode === "edit";
+  const currentMemberCount = team?.memberIds?.length ?? team?.members?.length ?? 1;
 
   function addSkill() {
     const trimmed = skillInput.trim();
@@ -45,43 +55,75 @@ function CreateTeamModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!user) { setError("You must be signed in."); return; }
-    if (!name.trim()) { setError("Team name is required."); return; }
+
+    if (!user) {
+      setError("You must be signed in.");
+      return;
+    }
+
+    if (!name.trim()) {
+      setError("Team name is required.");
+      return;
+    }
+
+    if (isEditMode && maxMembers < currentMemberCount) {
+      setError("Max members cannot be less than the current team size.");
+      return;
+    }
+
     setSubmitting(true);
     setError("");
+
     try {
-      const teamId = await createTeam(
-        {
-          name: name.trim(),
-          description: description.trim(),
-          maxMembers,
-          skills,
-          linkedEvents: [],
-          resources: [],
-        },
-        user.uid
-      );
-      const newTeam: Team = {
-        id: teamId,
+      const payload = {
         name: name.trim(),
         description: description.trim(),
-        avatar: "👥",
-        createdBy: user.uid,
-        members: [{ userId: user.uid, role: "leader", joinedAt: null as any }],
-        memberIds: [user.uid],
         maxMembers,
         skills,
-        linkedEvents: [],
-        status: "forming",
-        chat: true,
-        resources: [],
-        createdAt: null as any,
-        updatedAt: null as any,
       };
-      void logAnalyticsEvent("team_created", { team_name: name.trim() });
-      onCreated(newTeam);
+
+      if (isEditMode && team) {
+        await updateTeam(team.id, payload);
+        void logAnalyticsEvent("team_updated", {
+          team_id: team.id,
+          team_name: payload.name,
+        });
+        onUpdated({
+          ...team,
+          ...payload,
+          updatedAt: null as any,
+        });
+      } else {
+        const teamId = await createTeam(
+          {
+            ...payload,
+            linkedEvents: [],
+            resources: [],
+          },
+          user.uid
+        );
+
+        onCreated({
+          id: teamId,
+          name: payload.name,
+          description: payload.description,
+          avatar: "👥",
+          createdBy: user.uid,
+          members: [{ userId: user.uid, role: "leader", joinedAt: null as any }],
+          memberIds: [user.uid],
+          maxMembers: payload.maxMembers,
+          skills: payload.skills,
+          linkedEvents: [],
+          status: "forming",
+          chat: true,
+          resources: [],
+          createdAt: null as any,
+          updatedAt: null as any,
+        });
+        void logAnalyticsEvent("team_created", { team_name: payload.name });
+      }
     } catch {
-      setError("Failed to create team. Please try again.");
+      setError(isEditMode ? "Failed to update team. Please try again." : "Failed to create team. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -89,21 +131,33 @@ function CreateTeamModal({
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       style={{
-        position: "fixed", inset: 0, zIndex: 9999,
-        background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)",
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "rgba(0,0,0,0.75)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
       }}
     >
       <div className="card" style={{ width: "100%", maxWidth: 480, padding: 28, borderRadius: 16, position: "relative" }}>
-        <button className="btn-ghost" onClick={onClose} style={{ position: "absolute", right: 12, top: 12, padding: "4px 10px" }}>✕</button>
+        <button className="btn-ghost" onClick={onClose} style={{ position: "absolute", right: 12, top: 12, padding: "4px 10px" }}>
+          ✕
+        </button>
         <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
-          🚀 Create a Team
+          {isEditMode ? "✏️ Edit Team" : "🚀 Create a Team"}
         </h2>
-        <p style={{ color: "#8B8BAD", fontSize: 14, marginBottom: 22 }}>Start a team and invite others to join</p>
+        <p style={{ color: "#8B8BAD", fontSize: 14, marginBottom: 22 }}>
+          {isEditMode ? "Update your team details and keep your listing current" : "Start a team and invite others to join"}
+        </p>
 
-        <form onSubmit={(e) => { void handleSubmit(e); }}>
+        <form onSubmit={(e) => void handleSubmit(e)}>
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 12, color: "#8B8BAD", letterSpacing: 0.5, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
               Team Name *
@@ -138,20 +192,25 @@ function CreateTeamModal({
               Max Members
             </label>
             <div style={{ display: "flex", gap: 8 }}>
-              {[2, 3, 4, 5, 6].map((n) => (
+              {[2, 3, 4, 5, 6].map((count) => (
                 <button
-                  key={n}
+                  key={count}
                   type="button"
-                  onClick={() => setMaxMembers(n)}
+                  onClick={() => setMaxMembers(count)}
                   style={{
-                    flex: 1, padding: "8px 0", borderRadius: 8, border: "1.5px solid",
-                    borderColor: maxMembers === n ? "#6C3BFF" : "#2A2A4A",
-                    background: maxMembers === n ? "#6C3BFF22" : "transparent",
-                    color: maxMembers === n ? "#8B5CF6" : "#8B8BAD",
-                    cursor: "pointer", fontSize: 15, fontWeight: maxMembers === n ? 700 : 400,
+                    flex: 1,
+                    padding: "8px 0",
+                    borderRadius: 8,
+                    border: "1.5px solid",
+                    borderColor: maxMembers === count ? "#6C3BFF" : "#2A2A4A",
+                    background: maxMembers === count ? "#6C3BFF22" : "transparent",
+                    color: maxMembers === count ? "#8B5CF6" : "#8B8BAD",
+                    cursor: "pointer",
+                    fontSize: 15,
+                    fontWeight: maxMembers === count ? 700 : 400,
                   }}
                 >
-                  {n}
+                  {count}
                 </button>
               ))}
             </div>
@@ -167,7 +226,12 @@ function CreateTeamModal({
                 placeholder="e.g. React, ML, UI/UX"
                 value={skillInput}
                 onChange={(e) => setSkillInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSkill(); } }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addSkill();
+                  }
+                }}
                 style={{ flex: 1 }}
               />
               <button type="button" className="btn-ghost" onClick={addSkill} style={{ padding: "8px 14px" }}>
@@ -176,14 +240,14 @@ function CreateTeamModal({
             </div>
             {skills.length > 0 && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {skills.map((s) => (
+                {skills.map((skill) => (
                   <span
-                    key={s}
+                    key={skill}
                     className="tag"
                     style={{ background: "#6C3BFF22", color: "#8B5CF6", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}
-                    onClick={() => setSkills((prev) => prev.filter((x) => x !== s))}
+                    onClick={() => setSkills((prev) => prev.filter((entry) => entry !== skill))}
                   >
-                    {s} <span style={{ opacity: 0.7 }}>×</span>
+                    {skill} <span style={{ opacity: 0.7 }}>×</span>
                   </span>
                 ))}
               </div>
@@ -194,7 +258,7 @@ function CreateTeamModal({
 
           <div style={{ display: "flex", gap: 10 }}>
             <button type="submit" className="btn-primary" style={{ flex: 1 }} disabled={submitting}>
-              {submitting ? "Creating..." : "Create Team"}
+              {isEditMode ? (submitting ? "Saving..." : "Save Changes") : (submitting ? "Creating..." : "Create Team")}
             </button>
             <button type="button" className="btn-ghost" style={{ flex: 1 }} onClick={onClose}>
               Cancel
@@ -205,8 +269,6 @@ function CreateTeamModal({
     </div>
   );
 }
-
-// ─── Join Team Modal ───────────────────────────────────────────────────────────
 
 function JoinTeamModal({
   onClose,
@@ -234,13 +296,13 @@ function JoinTeamModal({
 
   const filtered = useMemo(
     () =>
-      openTeams.filter((t) => {
-        if (currentUserTeamIds.includes(t.id)) return false;
+      openTeams.filter((team) => {
+        if (currentUserTeamIds.includes(team.id)) return false;
         if (!search) return true;
         return (
-          t.name.toLowerCase().includes(search.toLowerCase()) ||
-          t.description?.toLowerCase().includes(search.toLowerCase()) ||
-          t.skills?.some((s) => s.toLowerCase().includes(search.toLowerCase()))
+          team.name.toLowerCase().includes(search.toLowerCase()) ||
+          team.description?.toLowerCase().includes(search.toLowerCase()) ||
+          team.skills?.some((skill) => skill.toLowerCase().includes(search.toLowerCase()))
         );
       }),
     [openTeams, search, currentUserTeamIds]
@@ -260,26 +322,29 @@ function JoinTeamModal({
     }
   }
 
-  const isFull = (team: Team) =>
-    (team.memberIds?.length ?? team.members?.length ?? 0) >= (team.maxMembers ?? 4);
+  const isFull = (team: Team) => (team.memberIds?.length ?? team.members?.length ?? 0) >= (team.maxMembers ?? 4);
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       style={{
-        position: "fixed", inset: 0, zIndex: 9999,
-        background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)",
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "rgba(0,0,0,0.75)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
       }}
     >
-      <div
-        className="card"
-        style={{
-          width: "100%", maxWidth: 560, padding: 28, borderRadius: 16,
-          position: "relative", maxHeight: "85vh", display: "flex", flexDirection: "column",
-        }}
-      >
-        <button className="btn-ghost" onClick={onClose} style={{ position: "absolute", right: 12, top: 12, padding: "4px 10px" }}>✕</button>
+      <div className="card" style={{ width: "100%", maxWidth: 560, padding: 28, borderRadius: 16, position: "relative", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+        <button className="btn-ghost" onClick={onClose} style={{ position: "absolute", right: 12, top: 12, padding: "4px 10px" }}>
+          ✕
+        </button>
         <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
           🔍 Browse Open Teams
         </h2>
@@ -296,7 +361,7 @@ function JoinTeamModal({
         {error && <p style={{ color: "#EF4444", fontSize: 13, marginBottom: 12 }}>{error}</p>}
 
         <div style={{ overflowY: "auto", flex: 1 }}>
-          {loading && [1, 2, 3].map((i) => <ShimmerCard key={i} height={90} />)}
+          {loading && [1, 2, 3].map((entry) => <ShimmerCard key={entry} height={90} />)}
 
           {!loading && filtered.length === 0 && (
             <div style={{ textAlign: "center", color: "#8B8BAD", padding: "40px 0" }}>
@@ -308,17 +373,20 @@ function JoinTeamModal({
             filtered.map((team) => {
               const memberCount = team.memberIds?.length ?? team.members?.length ?? 1;
               const full = isFull(team);
+
               return (
-                <div
-                  key={team.id}
-                  className="card"
-                  style={{ padding: 16, marginBottom: 12, borderRadius: 12, display: "flex", alignItems: "center", gap: 14 }}
-                >
+                <div key={team.id} className="card" style={{ padding: 16, marginBottom: 12, borderRadius: 12, display: "flex", alignItems: "center", gap: 14 }}>
                   <div
                     style={{
-                      width: 44, height: 44, borderRadius: 10, flexShrink: 0,
+                      width: 44,
+                      height: 44,
+                      borderRadius: 10,
+                      flexShrink: 0,
                       background: "linear-gradient(135deg, #6C3BFF, #10B981)",
-                      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 20,
                     }}
                   >
                     👥
@@ -326,12 +394,7 @@ function JoinTeamModal({
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>{team.name}</div>
                     {team.description && (
-                      <div
-                        style={{
-                          fontSize: 12, color: "#8B8BAD", marginBottom: 6,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}
-                      >
+                      <div style={{ fontSize: 12, color: "#8B8BAD", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {team.description}
                       </div>
                     )}
@@ -339,13 +402,9 @@ function JoinTeamModal({
                       <span style={{ fontSize: 11, color: "#8B8BAD" }}>
                         👥 {memberCount}/{team.maxMembers ?? 4} members
                       </span>
-                      {team.skills?.slice(0, 3).map((s) => (
-                        <span
-                          key={s}
-                          className="tag"
-                          style={{ fontSize: 11, background: "#16213E", color: "#A0A0C0", padding: "2px 8px" }}
-                        >
-                          {s}
+                      {team.skills?.slice(0, 3).map((skill) => (
+                        <span key={skill} className="tag" style={{ fontSize: 11, background: "#16213E", color: "#A0A0C0", padding: "2px 8px" }}>
+                          {skill}
                         </span>
                       ))}
                     </div>
@@ -354,7 +413,9 @@ function JoinTeamModal({
                     className={full ? "btn-ghost" : "btn-primary"}
                     style={{ flexShrink: 0, padding: "8px 16px", fontSize: 13 }}
                     disabled={full || joiningId === team.id}
-                    onClick={() => { if (!full) void handleJoin(team); }}
+                    onClick={() => {
+                      if (!full) void handleJoin(team);
+                    }}
                   >
                     {joiningId === team.id ? "Joining..." : full ? "Full" : "Join"}
                   </button>
@@ -371,8 +432,6 @@ function JoinTeamModal({
   );
 }
 
-// ─── Main Page ─────────────────────────────────────────────────────────────────
-
 export default function TeamsPage() {
   const [search, setSearch] = useState("");
   const [teammates, setTeammates] = useState<Teammate[]>([]);
@@ -380,6 +439,7 @@ export default function TeamsPage() {
   const [previewUser, setPreviewUser] = useState<Teammate | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const { showNotif } = useAppStore();
   const { user } = useAuthContext();
@@ -390,7 +450,7 @@ export default function TeamsPage() {
     getLeaderboard(60)
       .then((docs) => {
         if (!mounted) return;
-        const mapped = docs.map((u) => mapUserToTeammate(u));
+        const mapped = docs.map((entry) => mapUserToTeammate(entry));
         setTeammates(mapped.length ? mapped : TEAMMATES);
       })
       .catch(() => {
@@ -419,16 +479,14 @@ export default function TeamsPage() {
   const filtered = useMemo(
     () =>
       teammates.filter(
-        (u) =>
+        (entry) =>
           !search ||
-          u.name.toLowerCase().includes(search.toLowerCase()) ||
-          u.college.toLowerCase().includes(search.toLowerCase()) ||
-          u.skills.some((s) => s.toLowerCase().includes(search.toLowerCase()))
+          entry.name.toLowerCase().includes(search.toLowerCase()) ||
+          entry.college.toLowerCase().includes(search.toLowerCase()) ||
+          entry.skills.some((skill) => skill.toLowerCase().includes(search.toLowerCase()))
       ),
     [search, teammates]
   );
-
-  const closePreview = () => setPreviewUser(null);
 
   function handleTeamCreated(team: Team) {
     setMyTeams((prev) => [team, ...prev]);
@@ -436,9 +494,15 @@ export default function TeamsPage() {
     showNotif(`Team "${team.name}" created! 🎉`);
   }
 
+  function handleTeamUpdated(updatedTeam: Team) {
+    setMyTeams((prev) => prev.map((team) => (team.id === updatedTeam.id ? updatedTeam : team)));
+    setEditingTeam(null);
+    showNotif(`Updated "${updatedTeam.name}" successfully.`);
+  }
+
   function handleTeamJoined(team: Team) {
     setMyTeams((prev) => {
-      if (prev.find((t) => t.id === team.id)) return prev;
+      if (prev.find((entry) => entry.id === team.id)) return prev;
       return [team, ...prev];
     });
     setShowJoinModal(false);
@@ -449,20 +513,37 @@ export default function TeamsPage() {
     if (!user) return;
     try {
       await leaveTeam(team.id, user.uid);
-      setMyTeams((prev) => prev.filter((t) => t.id !== team.id));
+      setMyTeams((prev) => prev.filter((entry) => entry.id !== team.id));
       showNotif(`Left "${team.name}".`);
     } catch {
       showNotif("Failed to leave team.");
     }
   }
 
+  function isTeamOwner(team: Team) {
+    return team.createdBy === user?.uid;
+  }
+
+  const closePreview = () => setPreviewUser(null);
+
   return (
     <div className="fade-in">
-      {/* Modals */}
       {showCreateModal && (
-        <CreateTeamModal
+        <TeamModal
+          mode="create"
           onClose={() => setShowCreateModal(false)}
           onCreated={handleTeamCreated}
+          onUpdated={handleTeamUpdated}
+        />
+      )}
+
+      {editingTeam && (
+        <TeamModal
+          mode="edit"
+          team={editingTeam}
+          onClose={() => setEditingTeam(null)}
+          onCreated={handleTeamCreated}
+          onUpdated={handleTeamUpdated}
         />
       )}
 
@@ -471,11 +552,10 @@ export default function TeamsPage() {
           onClose={() => setShowJoinModal(false)}
           onJoined={handleTeamJoined}
           currentUserId={user.uid}
-          currentUserTeamIds={myTeams.map((t) => t.id)}
+          currentUserTeamIds={myTeams.map((team) => team.id)}
         />
       )}
 
-      {/* Teammate preview modal */}
       {previewUser && (
         <div
           onClick={(e) => {
@@ -493,29 +573,13 @@ export default function TeamsPage() {
             padding: 16,
           }}
         >
-          <div
-            className="card"
-            style={{
-              width: "100%",
-              maxWidth: 520,
-              padding: 24,
-              position: "relative",
-              borderRadius: 14,
-            }}
-          >
-            <button
-              className="btn-ghost"
-              onClick={closePreview}
-              style={{ position: "absolute", right: 12, top: 12, padding: "4px 10px" }}
-            >
+          <div className="card" style={{ width: "100%", maxWidth: 520, padding: 24, position: "relative", borderRadius: 14 }}>
+            <button className="btn-ghost" onClick={closePreview} style={{ position: "absolute", right: 12, top: 12, padding: "4px 10px" }}>
               ✕
             </button>
 
             <div style={{ display: "flex", gap: 14, marginBottom: 18 }}>
-              <div
-                className="avatar"
-                style={{ width: 56, height: 56, fontSize: 18, background: previewUser.color + "33", color: previewUser.color }}
-              >
+              <div className="avatar" style={{ width: 56, height: 56, fontSize: 18, background: previewUser.color + "33", color: previewUser.color }}>
                 {previewUser.avatar}
               </div>
               <div style={{ flex: 1 }}>
@@ -537,9 +601,9 @@ export default function TeamsPage() {
                 Skills
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {previewUser.skills.map((s) => (
-                  <span key={s} className="tag" style={{ background: "#16213E", color: "#A0A0C0" }}>
-                    {s}
+                {previewUser.skills.map((skill) => (
+                  <span key={skill} className="tag" style={{ background: "#16213E", color: "#A0A0C0" }}>
+                    {skill}
                   </span>
                 ))}
               </div>
@@ -575,7 +639,6 @@ export default function TeamsPage() {
         </div>
       )}
 
-      {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 28, fontWeight: 700, marginBottom: 8 }}>
           🤝 Team Finder
@@ -583,12 +646,14 @@ export default function TeamsPage() {
         <p style={{ color: "#8B8BAD" }}>Find the perfect teammates for your next hackathon</p>
       </div>
 
-      {/* Action bar */}
       <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
         <button
           className="btn-primary"
           onClick={() => {
-            if (!user) { showNotif("Sign in to create a team."); return; }
+            if (!user) {
+              showNotif("Sign in to create a team.");
+              return;
+            }
             setShowCreateModal(true);
           }}
         >
@@ -598,7 +663,10 @@ export default function TeamsPage() {
           className="btn-ghost"
           style={{ border: "1.5px solid #2A2A4A" }}
           onClick={() => {
-            if (!user) { showNotif("Sign in to join a team."); return; }
+            if (!user) {
+              showNotif("Sign in to join a team.");
+              return;
+            }
             setShowJoinModal(true);
           }}
         >
@@ -613,55 +681,48 @@ export default function TeamsPage() {
         />
       </div>
 
-      {/* Teammate cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 40 }}>
-        {loading && [1, 2, 3, 4].map((i) => <ShimmerCard key={i} height={250} />)}
+        {loading && [1, 2, 3, 4].map((entry) => <ShimmerCard key={entry} height={250} />)}
         {!loading &&
-          filtered.map((u) => (
-            <div key={u.id} className="team-card">
+          filtered.map((entry) => (
+            <div key={entry.id} className="team-card">
               <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
-                <div
-                  className="avatar"
-                  style={{ width: 48, height: 48, fontSize: 16, background: u.color + "33", color: u.color }}
-                >
-                  {u.avatar}
+                <div className="avatar" style={{ width: 48, height: 48, fontSize: 16, background: entry.color + "33", color: entry.color }}>
+                  {entry.avatar}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{u.name}</div>
-                  <div style={{ fontSize: 13, color: "#8B8BAD", marginBottom: 6 }}>{u.college}</div>
+                  <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{entry.name}</div>
+                  <div style={{ fontSize: 13, color: "#8B8BAD", marginBottom: 6 }}>{entry.college}</div>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <span
-                      className="badge"
-                      style={{ background: "#6C3BFF22", color: "#8B5CF6", fontSize: 11, padding: "3px 10px" }}
-                    >
-                      🎯 {u.match}% Match
+                    <span className="badge" style={{ background: "#6C3BFF22", color: "#8B5CF6", fontSize: 11, padding: "3px 10px" }}>
+                      🎯 {entry.match}% Match
                     </span>
                     <span
                       className="badge"
                       style={{
-                        background: u.looking.includes("Has") ? "#10B98122" : "#F59E0B22",
-                        color: u.looking.includes("Has") ? "#10B981" : "#F59E0B",
+                        background: entry.looking.includes("Has") ? "#10B98122" : "#F59E0B22",
+                        color: entry.looking.includes("Has") ? "#10B981" : "#F59E0B",
                         fontSize: 11,
                         padding: "3px 10px",
                       }}
                     >
-                      {u.looking}
+                      {entry.looking}
                     </span>
                   </div>
                 </div>
               </div>
 
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-                {u.skills.map((s) => (
-                  <span key={s} className="tag" style={{ background: "#16213E", color: "#A0A0C0", fontSize: 12 }}>
-                    {s}
+                {entry.skills.map((skill) => (
+                  <span key={skill} className="tag" style={{ background: "#16213E", color: "#A0A0C0", fontSize: 12 }}>
+                    {skill}
                   </span>
                 ))}
               </div>
 
               <div style={{ display: "flex", gap: 16, marginBottom: 16, fontSize: 13, color: "#8B8BAD" }}>
-                <span>🏆 {u.hackathons} hackathons</span>
-                <span>⭐ {u.rating} rating</span>
+                <span>🏆 {entry.hackathons} hackathons</span>
+                <span>⭐ {entry.rating} rating</span>
               </div>
 
               <div style={{ display: "flex", gap: 8 }}>
@@ -669,8 +730,8 @@ export default function TeamsPage() {
                   className="btn-primary"
                   style={{ flex: 1, padding: "8px 14px", fontSize: 13 }}
                   onClick={() => {
-                    void logAnalyticsEvent("team_request_send", { target_user_id: u.id, target_user_name: u.name });
-                    showNotif(`Request sent to ${u.name}! 🎉`);
+                    void logAnalyticsEvent("team_request_send", { target_user_id: entry.id, target_user_name: entry.name });
+                    showNotif(`Request sent to ${entry.name}! 🎉`);
                   }}
                 >
                   Send Request
@@ -679,8 +740,8 @@ export default function TeamsPage() {
                   className="btn-ghost"
                   style={{ flex: 1, fontSize: 13 }}
                   onClick={() => {
-                    void logAnalyticsEvent("team_profile_preview_click", { target_user_id: u.id, target_user_name: u.name });
-                    setPreviewUser(u);
+                    void logAnalyticsEvent("team_profile_preview_click", { target_user_id: entry.id, target_user_name: entry.name });
+                    setPreviewUser(entry);
                   }}
                 >
                   View Profile
@@ -690,7 +751,6 @@ export default function TeamsPage() {
           ))}
       </div>
 
-      {/* My Teams */}
       <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, marginBottom: 16 }}>
         Your Active Team{myTeams.length > 1 ? "s" : ""}
       </h2>
@@ -705,7 +765,10 @@ export default function TeamsPage() {
             <button
               className="btn-primary"
               onClick={() => {
-                if (!user) { showNotif("Sign in to create a team."); return; }
+                if (!user) {
+                  showNotif("Sign in to create a team.");
+                  return;
+                }
                 setShowCreateModal(true);
               }}
             >
@@ -715,7 +778,10 @@ export default function TeamsPage() {
               className="btn-ghost"
               style={{ border: "1.5px solid #2A2A4A" }}
               onClick={() => {
-                if (!user) { showNotif("Sign in to join a team."); return; }
+                if (!user) {
+                  showNotif("Sign in to join a team.");
+                  return;
+                }
                 setShowJoinModal(true);
               }}
             >
@@ -732,10 +798,14 @@ export default function TeamsPage() {
                 <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
                   <div
                     style={{
-                      width: 56, height: 56, flexShrink: 0,
+                      width: 56,
+                      height: 56,
+                      flexShrink: 0,
                       background: "linear-gradient(135deg, #6C3BFF, #10B981)",
                       borderRadius: 12,
-                      display: "flex", alignItems: "center", justifyContent: "center",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                       fontSize: 24,
                     }}
                   >
@@ -759,46 +829,52 @@ export default function TeamsPage() {
 
                 {team.skills?.length > 0 && (
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
-                    {team.skills.map((s) => (
-                      <span key={s} className="tag" style={{ background: "#16213E", color: "#A0A0C0", fontSize: 12 }}>
-                        {s}
+                    {team.skills.map((skill) => (
+                      <span key={skill} className="tag" style={{ background: "#16213E", color: "#A0A0C0", fontSize: 12 }}>
+                        {skill}
                       </span>
                     ))}
                   </div>
                 )}
 
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: team.createdBy !== user?.uid ? 16 : 0 }}>
-                  {team.members.slice(0, 5).map((m) => (
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+                  {team.members.slice(0, 5).map((member) => (
                     <div
-                      key={m.userId}
+                      key={member.userId}
                       style={{
-                        flex: "1 1 110px", background: "#16213E",
-                        borderRadius: 10, padding: "12px 14px", textAlign: "center",
+                        flex: "1 1 110px",
+                        background: "#16213E",
+                        borderRadius: 10,
+                        padding: "12px 14px",
+                        textAlign: "center",
                       }}
                     >
-                      <div
-                        className="avatar"
-                        style={{ margin: "0 auto 8px", background: "#6C3BFF33", color: "#6C3BFF", width: 36, height: 36, fontSize: 13 }}
-                      >
-                        {m.userId.slice(0, 2).toUpperCase()}
+                      <div className="avatar" style={{ margin: "0 auto 8px", background: "#6C3BFF33", color: "#6C3BFF", width: 36, height: 36, fontSize: 13 }}>
+                        {member.userId.slice(0, 2).toUpperCase()}
                       </div>
-                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{m.role}</div>
+                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{member.role}</div>
                       <div style={{ fontSize: 11, color: "#8B8BAD" }}>
-                        {m.userId === user?.uid ? "You" : m.userId.slice(0, 8) + "..."}
+                        {member.userId === user?.uid ? "You" : member.userId.slice(0, 8) + "..."}
                       </div>
                     </div>
                   ))}
                 </div>
 
-                {team.createdBy !== user?.uid && (
-                  <button
-                    className="btn-ghost"
-                    style={{ fontSize: 13, color: "#EF4444", borderColor: "#EF444422" }}
-                    onClick={() => void handleLeaveTeam(team)}
-                  >
-                    Leave Team
-                  </button>
-                )}
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {isTeamOwner(team) ? (
+                    <button className="btn-ghost" style={{ fontSize: 13 }} onClick={() => setEditingTeam(team)}>
+                      Edit Team
+                    </button>
+                  ) : (
+                    <button
+                      className="btn-ghost"
+                      style={{ fontSize: 13, color: "#EF4444", borderColor: "#EF444422" }}
+                      onClick={() => void handleLeaveTeam(team)}
+                    >
+                      Leave Team
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}

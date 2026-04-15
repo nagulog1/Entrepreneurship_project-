@@ -475,6 +475,19 @@ export async function createTeam(
   return ref.id;
 }
 
+export async function updateTeam(
+  teamId: string,
+  data: Pick<Team, 'name' | 'description' | 'maxMembers' | 'skills'>
+): Promise<void> {
+  await updateDoc(doc(db, 'teams', teamId), {
+    name: data.name,
+    description: data.description,
+    maxMembers: data.maxMembers,
+    skills: data.skills,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function getTeamById(teamId: string): Promise<Team | null> {
   try {
     const snap = await getDoc(doc(db, 'teams', teamId));
