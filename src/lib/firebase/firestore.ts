@@ -13,6 +13,7 @@ import {
   limit,
   increment,
   serverTimestamp,
+  Timestamp,
   onSnapshot,
   arrayUnion,
   writeBatch,
@@ -464,7 +465,7 @@ export async function createTeam(
   const ref = await addDoc(collection(db, 'teams'), {
     ...data,
     createdBy: userId,
-    members: [{ userId, role: 'leader', joinedAt: serverTimestamp() }],
+    members: [{ userId, role: 'leader', joinedAt: Timestamp.now() }],
     memberIds: [userId],
     status: 'forming',
     chat: true,
