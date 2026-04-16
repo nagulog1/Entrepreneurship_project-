@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import EventCard from "@/components/events/EventCard";
 import { EVENTS } from "@/lib/data/events";
 import { useAppStore } from "@/stores/useAppStore";
-import { getEvents } from "@/lib/firebase/firestore";
+import { getEvents, seedEventsToFirestore } from "@/lib/firebase/firestore";
+import { useAuthContext } from "@/contexts/AuthContext";
 import { mapEventToCardEvent } from "@/lib/utils/firestoreMappers";
 import { isAlgoliaSearchConfigured, searchEventsInAlgolia } from "@/lib/search/algolia";
 import ShimmerCard from "@/components/shared/ShimmerCard";
@@ -21,6 +22,13 @@ export default function EventsPage() {
   const [searchingRemote, setSearchingRemote] = useState(false);
   const [loading, setLoading] = useState(true);
   const { bookmarked, toggleBookmark } = useAppStore();
+  const { user } = useAuthContext();
+
+  // Seed missing events to Firestore once when user is signed in
+  useEffect(() => {
+    if (!user) return;
+    seedEventsToFirestore(user.uid).catch(() => {});
+  }, [user]);
 
   useEffect(() => {
     let mounted = true;
@@ -29,7 +37,10 @@ export default function EventsPage() {
       .then((docs) => {
         if (!mounted) return;
         const mapped = docs.map((e) => mapEventToCardEvent(e));
-        setEvents(mapped.length ? mapped : EVENTS);
+        // Merge: Firestore events take precedence; static events fill in any gaps
+        const firestoreIds = new Set(mapped.map((e) => e.id));
+        const staticFallback = EVENTS.filter((e) => !firestoreIds.has(e.id));
+        setEvents(mapped.length ? [...mapped, ...staticFallback] : EVENTS);
       })
       .catch(() => {
         if (mounted) setEvents(EVENTS);

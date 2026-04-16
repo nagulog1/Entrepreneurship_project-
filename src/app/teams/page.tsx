@@ -10,13 +10,18 @@ import {
   createTeam,
   getLeaderboard,
   getOpenTeams,
+  getUserById,
   getUserTeams,
   joinTeam,
   leaveTeam,
+  sendTeammateRequest,
   updateTeam,
+  getReceivedTeamRequests,
+  acceptTeamRequest,
+  rejectTeamRequest,
 } from "@/lib/firebase/firestore";
 import { mapUserToTeammate } from "@/lib/utils/firestoreMappers";
-import type { Team, Teammate } from "@/types";
+import type { Team, Teammate, TeamRequest } from "@/types";
 
 type TeamModalMode = "create" | "edit";
 
@@ -435,14 +440,20 @@ function JoinTeamModal({
 export default function TeamsPage() {
   const [search, setSearch] = useState("");
   const [teammates, setTeammates] = useState<Teammate[]>([]);
+  const [showDemoTeammates, setShowDemoTeammates] = useState(false);
   const [myTeams, setMyTeams] = useState<Team[]>([]);
   const [previewUser, setPreviewUser] = useState<Teammate | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [sendingRequestId, setSendingRequestId] = useState<string | null>(null);
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  const [receivedRequests, setReceivedRequests] = useState<TeamRequest[]>([]);
+  const [requestActionLoading, setRequestActionLoading] = useState<string | null>(null);
   const { showNotif } = useAppStore();
-  const { user } = useAuthContext();
+  const { user, userProfile } = useAuthContext();
+  const myName = userProfile?.displayName || user?.displayName || user?.email || "Someone";
 
   useEffect(() => {
     let mounted = true;
@@ -451,10 +462,14 @@ export default function TeamsPage() {
       .then((docs) => {
         if (!mounted) return;
         const mapped = docs.map((entry) => mapUserToTeammate(entry));
+        setShowDemoTeammates(mapped.length === 0);
         setTeammates(mapped.length ? mapped : TEAMMATES);
       })
       .catch(() => {
-        if (mounted) setTeammates(TEAMMATES);
+        if (mounted) {
+          setShowDemoTeammates(true);
+          setTeammates(TEAMMATES);
+        }
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -468,13 +483,39 @@ export default function TeamsPage() {
   useEffect(() => {
     if (!user) {
       setMyTeams([]);
+      setReceivedRequests([]);
       return;
     }
 
     getUserTeams(user.uid)
       .then((teams) => setMyTeams(teams))
       .catch(() => setMyTeams([]));
+
+    getReceivedTeamRequests(user.uid)
+      .then((reqs) => setReceivedRequests(reqs))
+      .catch(() => setReceivedRequests([]));
   }, [user]);
+
+  // Batch-fetch real display names for all team members
+  useEffect(() => {
+    const allIds = myTeams.flatMap((t) =>
+      (t.memberIds ?? t.members.map((m) => m.userId))
+    );
+    const missing = Array.from(new Set(allIds)).filter((id) => !(id in memberNames));
+    if (missing.length === 0) return;
+
+    missing.forEach((id) => {
+      getUserById(id)
+        .then((profile) => {
+          const name = profile?.displayName || profile?.name || null;
+          if (name) {
+            setMemberNames((prev) => ({ ...prev, [id]: name }));
+          }
+        })
+        .catch(() => {});
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myTeams]);
 
   const filtered = useMemo(
     () =>
@@ -522,6 +563,52 @@ export default function TeamsPage() {
 
   function isTeamOwner(team: Team) {
     return team.createdBy === user?.uid;
+  }
+
+  function isDemoTeammate(teammate: Teammate) {
+    return teammate.id.startsWith("teammate-");
+  }
+
+  async function handleSendRequest(teammate: Teammate) {
+    if (!user) {
+      showNotif("Sign in to send a request.");
+      return;
+    }
+
+    if (isDemoTeammate(teammate)) {
+      showNotif("This is a demo profile. Requests can only be sent to real Firestore users.", "error");
+      return;
+    }
+
+    if (teammate.id === user.uid) {
+      showNotif("You cannot send a request to yourself.");
+      return;
+    }
+
+    setSendingRequestId(teammate.id);
+    try {
+      await sendTeammateRequest({
+        fromUserId: user.uid,
+        fromUserName: userProfile?.displayName || user.displayName || user.email || "A user",
+        fromUserPhoto: userProfile?.photoURL || user.photoURL || "",
+        toUserId: teammate.id,
+        toUserName: teammate.name,
+        requiredSkills: teammate.skills,
+        teamSize: myTeams[0]?.maxMembers ?? 2,
+        role: "Teammate",
+        message: `${userProfile?.displayName || user.displayName || "Someone"} wants to team up with you.`,
+      });
+      void logAnalyticsEvent("team_request_send", {
+        target_user_id: teammate.id,
+        target_user_name: teammate.name,
+      });
+      showNotif(`Request sent to ${teammate.name}! 🎉`);
+      setPreviewUser((current) => (current?.id === teammate.id ? null : current));
+    } catch {
+      showNotif("Failed to send request. Please try again.", "error");
+    } finally {
+      setSendingRequestId(null);
+    }
   }
 
   const closePreview = () => setPreviewUser(null);
@@ -624,12 +711,16 @@ export default function TeamsPage() {
               <button
                 className="btn-primary"
                 style={{ flex: 1 }}
+                disabled={sendingRequestId === previewUser.id || isDemoTeammate(previewUser)}
                 onClick={() => {
-                  showNotif(`Request sent to ${previewUser.name}! 🎉`);
-                  closePreview();
+                  void handleSendRequest(previewUser);
                 }}
               >
-                Send Request
+                {isDemoTeammate(previewUser)
+                  ? "Demo Profile"
+                  : sendingRequestId === previewUser.id
+                    ? "Sending..."
+                    : "Send Request"}
               </button>
               <button className="btn-ghost" style={{ flex: 1 }} onClick={closePreview}>
                 Close
@@ -644,6 +735,11 @@ export default function TeamsPage() {
           🤝 Team Finder
         </h1>
         <p style={{ color: "#8B8BAD" }}>Find the perfect teammates for your next hackathon</p>
+        {showDemoTeammates && (
+          <p style={{ color: "#F59E0B", marginTop: 8, fontSize: 13 }}>
+            Showing demo teammates because no real Firestore user profiles were loaded. Requests are only enabled for real users.
+          </p>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
@@ -729,12 +825,16 @@ export default function TeamsPage() {
                 <button
                   className="btn-primary"
                   style={{ flex: 1, padding: "8px 14px", fontSize: 13 }}
+                  disabled={sendingRequestId === entry.id || isDemoTeammate(entry)}
                   onClick={() => {
-                    void logAnalyticsEvent("team_request_send", { target_user_id: entry.id, target_user_name: entry.name });
-                    showNotif(`Request sent to ${entry.name}! 🎉`);
+                    void handleSendRequest(entry);
                   }}
                 >
-                  Send Request
+                  {isDemoTeammate(entry)
+                    ? "Demo Profile"
+                    : sendingRequestId === entry.id
+                      ? "Sending..."
+                      : "Send Request"}
                 </button>
                 <button
                   className="btn-ghost"
@@ -751,9 +851,153 @@ export default function TeamsPage() {
           ))}
       </div>
 
-      <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, marginBottom: 16 }}>
-        Your Active Team{myTeams.length > 1 ? "s" : ""}
-      </h2>
+      {/* ── Received Requests Section ─────────────────────────────────────── */}
+      {user && receivedRequests.length > 0 && (
+        <div style={{ marginBottom: 32 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, margin: 0 }}>
+              📬 Received Requests
+            </h2>
+            <span
+              style={{
+                background: "#F59E0B22",
+                color: "#F59E0B",
+                borderRadius: 10,
+                padding: "2px 10px",
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              {receivedRequests.length} pending
+            </span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {receivedRequests.map((req) => {
+              const isLoading = requestActionLoading === req.id;
+              return (
+                <div
+                  key={req.id}
+                  className="card"
+                  style={{
+                    padding: 20,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 16,
+                    border: "1px solid #6C3BFF22",
+                    background: "linear-gradient(135deg, #16213E, #1E1E3588)",
+                  }}
+                >
+                  {/* Avatar */}
+                  <div
+                    className="avatar"
+                    style={{
+                      width: 48,
+                      height: 48,
+                      fontSize: 16,
+                      background: "#6C3BFF33",
+                      color: "#8B5CF6",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {(req.fromUserName || "?").charAt(0).toUpperCase()}
+                  </div>
+
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: "#F0F0FF", marginBottom: 3 }}>
+                      {req.fromUserName}
+                    </div>
+                    <div style={{ fontSize: 13, color: "#8B8BAD", marginBottom: 6, lineHeight: 1.4 }}>
+                      {req.message || "wants to team up with you"}
+                    </div>
+                    {req.requiredSkills && req.requiredSkills.length > 0 && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {req.requiredSkills.slice(0, 4).map((skill) => (
+                          <span
+                            key={skill}
+                            className="tag"
+                            style={{ fontSize: 11, background: "#16213E", color: "#A0A0C0", padding: "2px 8px" }}
+                          >
+                            {skill}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Accept / Decline */}
+                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                    <button
+                      className="btn-primary"
+                      disabled={isLoading}
+                      style={{
+                        padding: "8px 20px",
+                        fontSize: 13,
+                        borderRadius: 8,
+                        opacity: isLoading ? 0.6 : 1,
+                      }}
+                      onClick={async () => {
+                        if (!req.id) return;
+                        setRequestActionLoading(req.id);
+                        try {
+                          await acceptTeamRequest(req.id, user.uid, myName);
+                          setReceivedRequests((prev) => prev.filter((r) => r.id !== req.id));
+                          showNotif(`Accepted request from ${req.fromUserName}! 🎉`);
+                        } catch {
+                          showNotif("Failed to accept. Please try again.", "error");
+                        } finally {
+                          setRequestActionLoading(null);
+                        }
+                      }}
+                    >
+                      {isLoading ? "..." : "✓ Accept"}
+                    </button>
+                    <button
+                      className="btn-ghost"
+                      disabled={isLoading}
+                      style={{
+                        padding: "8px 20px",
+                        fontSize: 13,
+                        borderRadius: 8,
+                        color: "#EF4444",
+                        borderColor: "#EF444433",
+                        opacity: isLoading ? 0.6 : 1,
+                      }}
+                      onClick={async () => {
+                        if (!req.id) return;
+                        setRequestActionLoading(req.id);
+                        try {
+                          await rejectTeamRequest(req.id, user.uid, myName);
+                          setReceivedRequests((prev) => prev.filter((r) => r.id !== req.id));
+                          showNotif("Request declined.");
+                        } catch {
+                          showNotif("Failed to decline. Please try again.", "error");
+                        } finally {
+                          setRequestActionLoading(null);
+                        }
+                      }}
+                    >
+                      ✕ Decline
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 16 }}>
+        <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, margin: 0 }}>
+          Your Active Team{myTeams.length > 1 ? "s" : ""}
+        </h2>
+        {myTeams.length > 0 && (
+          <span style={{ fontSize: 13, color: "#8B8BAD" }}>
+            {myTeams.reduce((sum, t) => sum + (t.memberIds?.length ?? t.members?.length ?? 0), 0)} member{myTeams.reduce((sum, t) => sum + (t.memberIds?.length ?? t.members?.length ?? 0), 0) !== 1 ? "s" : ""} across {myTeams.length} team{myTeams.length !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
 
       {myTeams.length === 0 ? (
         <div className="card" style={{ padding: 36, textAlign: "center" }}>
@@ -838,26 +1082,57 @@ export default function TeamsPage() {
                 )}
 
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-                  {team.members.slice(0, 5).map((member) => (
+                  {team.members.slice(0, 5).map((member) => {
+                    const isSelf = member.userId === user?.uid;
+                    const resolvedName = isSelf
+                      ? (userProfile?.displayName || user?.displayName || "You")
+                      : (memberNames[member.userId] ?? null);
+                    const initials = resolvedName
+                      ? resolvedName.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
+                      : member.userId.slice(0, 2).toUpperCase();
+                    const displayLabel = isSelf ? "You" : (resolvedName ?? member.userId.slice(0, 8) + "...");
+                    return (
+                      <div
+                        key={member.userId}
+                        style={{
+                          flex: "1 1 110px",
+                          background: "#16213E",
+                          borderRadius: 10,
+                          padding: "12px 14px",
+                          textAlign: "center",
+                        }}
+                      >
+                        <div className="avatar" style={{ margin: "0 auto 8px", background: isSelf ? "#10B98133" : "#6C3BFF33", color: isSelf ? "#10B981" : "#6C3BFF", width: 36, height: 36, fontSize: 13 }}>
+                          {initials}
+                        </div>
+                        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2, textTransform: "capitalize" }}>{member.role}</div>
+                        <div
+                          style={{ fontSize: 11, color: isSelf ? "#10B981" : "#8B8BAD", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}
+                          title={resolvedName ?? member.userId}
+                        >
+                          {displayLabel}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {team.members.length > 5 && (
                     <div
-                      key={member.userId}
                       style={{
                         flex: "1 1 110px",
                         background: "#16213E",
                         borderRadius: 10,
                         padding: "12px 14px",
                         textAlign: "center",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
                       }}
                     >
-                      <div className="avatar" style={{ margin: "0 auto 8px", background: "#6C3BFF33", color: "#6C3BFF", width: 36, height: 36, fontSize: 13 }}>
-                        {member.userId.slice(0, 2).toUpperCase()}
-                      </div>
-                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{member.role}</div>
-                      <div style={{ fontSize: 11, color: "#8B8BAD" }}>
-                        {member.userId === user?.uid ? "You" : member.userId.slice(0, 8) + "..."}
-                      </div>
+                      <div style={{ fontWeight: 700, fontSize: 18, color: "#8B5CF6" }}>+{team.members.length - 5}</div>
+                      <div style={{ fontSize: 11, color: "#8B8BAD", marginTop: 4 }}>more members</div>
                     </div>
-                  ))}
+                  )}
                 </div>
 
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>

@@ -10,7 +10,10 @@
     { "collectionGroup": "forumThreads", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "category",  "order": "ASCENDING"  }, { "fieldPath": "createdAt",   "order": "DESCENDING" }] },
     { "collectionGroup": "forumThreads", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "isPinned",  "order": "DESCENDING" }, { "fieldPath": "createdAt",   "order": "DESCENDING" }] },
     { "collectionGroup": "teams",        "queryScope": "COLLECTION", "fields": [{ "fieldPath": "status",    "order": "ASCENDING"  }, { "fieldPath": "createdAt",   "order": "DESCENDING" }] },
-    { "collectionGroup": "contests",     "queryScope": "COLLECTION", "fields": [{ "fieldPath": "status",    "order": "ASCENDING"  }, { "fieldPath": "startTime",   "order": "ASCENDING"  }] }
+    { "collectionGroup": "contests",     "queryScope": "COLLECTION", "fields": [{ "fieldPath": "status",    "order": "ASCENDING"  }, { "fieldPath": "startTime",   "order": "ASCENDING"  }] },
+    { "collectionGroup": "teamRequests", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "toUserId",  "order": "ASCENDING"  }, { "fieldPath": "status",      "order": "ASCENDING"  }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "teamRequests", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "fromUserId","order": "ASCENDING"  }, { "fieldPath": "status",      "order": "ASCENDING"  }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "teamRequests", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "status",    "order": "ASCENDING"  }, { "fieldPath": "createdAt",   "order": "DESCENDING" }] }
   ],
   "fieldOverrides": []
 }

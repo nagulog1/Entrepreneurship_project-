@@ -5,7 +5,13 @@ import { useRouter } from 'next/navigation';
 import { onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuthContext } from '@/contexts/AuthContext';
-import { markNotificationRead, markAllNotificationsRead } from '@/lib/firebase/firestore';
+import {
+  markNotificationRead,
+  markAllNotificationsRead,
+  acceptTeamRequest,
+  rejectTeamRequest,
+} from '@/lib/firebase/firestore';
+import { useAppStore } from '@/stores/useAppStore';
 import ShimmerCard from '@/components/shared/ShimmerCard';
 import AuthModal from '@/components/auth/AuthModal';
 import type { FirestoreNotification } from '@/types';
@@ -63,32 +69,64 @@ const TYPE_ICONS: Record<string, string> = {
   system:      '🔔',
 };
 
+// ─── helper: is this a pending incoming teammate request? ─────────────────────
+
+function isIncomingTeamRequest(notif: FirestoreNotification, myUid: string): boolean {
+  if (notif.type !== 'team') return false;
+  const meta = notif.metadata as Record<string, unknown> | undefined;
+  if (!meta?.requestId) return false;
+  // It's incoming if toUserId is ME (i.e. someone else sent it to me)
+  if (meta.toUserId === myUid) return true;
+  return false;
+}
+
+function isAlreadyActioned(notif: FirestoreNotification): boolean {
+  const meta = notif.metadata as Record<string, unknown> | undefined;
+  return meta?.action === 'accepted' || meta?.action === 'rejected';
+}
+
 // ─── Notification Row ─────────────────────────────────────────────────────────
 
 function NotifRow({
   notif,
+  myUid,
+  myName,
   onRead,
+  onAccept,
+  onReject,
+  actionLoading,
 }: {
   notif: FirestoreNotification;
+  myUid: string;
+  myName: string;
   onRead: (id: string, link: string) => void;
+  onAccept: (notif: FirestoreNotification) => void;
+  onReject: (notif: FirestoreNotification) => void;
+  actionLoading: string | null;
 }) {
   const icon = TYPE_ICONS[notif.type] ?? '🔔';
   const isUnread = !notif.isRead;
+  const showActions = isIncomingTeamRequest(notif, myUid) && !isAlreadyActioned(notif);
+  const meta = notif.metadata as Record<string, unknown> | undefined;
+  const requestId = meta?.requestId as string | undefined;
+  const isLoading = actionLoading === requestId;
 
   return (
     <div
-      onClick={() => onRead(notif.id!, notif.link)}
       style={{
         display: 'flex',
         gap: 14,
         alignItems: 'flex-start',
         padding: '14px 18px',
         borderRadius: 10,
-        cursor: 'pointer',
+        cursor: showActions ? 'default' : 'pointer',
         background: isUnread ? '#6C3BFF0A' : 'transparent',
         border: `1px solid ${isUnread ? '#6C3BFF22' : 'transparent'}`,
         marginBottom: 6,
         transition: 'all 0.2s',
+      }}
+      onClick={() => {
+        if (!showActions) onRead(notif.id!, notif.link);
       }}
     >
       {/* Icon */}
@@ -110,7 +148,50 @@ function NotifRow({
         <div style={{ fontSize: 13, color: '#8B8BAD', lineHeight: 1.4, marginBottom: 4 }}>
           {notif.message}
         </div>
-        <div style={{ fontSize: 11, color: '#5A5A80' }}>{timeAgo(notif.createdAt)}</div>
+
+        {/* Accept / Reject buttons for incoming team requests */}
+        {showActions && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button
+              className="btn-primary"
+              disabled={isLoading}
+              style={{
+                padding: '6px 18px',
+                fontSize: 13,
+                borderRadius: 8,
+                opacity: isLoading ? 0.6 : 1,
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAccept(notif);
+              }}
+            >
+              {isLoading ? 'Processing…' : '✓ Accept'}
+            </button>
+            <button
+              className="btn-ghost"
+              disabled={isLoading}
+              style={{
+                padding: '6px 18px',
+                fontSize: 13,
+                borderRadius: 8,
+                color: '#EF4444',
+                borderColor: '#EF444433',
+                opacity: isLoading ? 0.6 : 1,
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onReject(notif);
+              }}
+            >
+              ✕ Decline
+            </button>
+          </div>
+        )}
+
+        <div style={{ fontSize: 11, color: '#5A5A80', marginTop: showActions ? 6 : 0 }}>
+          {timeAgo(notif.createdAt)}
+        </div>
       </div>
 
       {/* Unread dot */}
@@ -130,11 +211,15 @@ function NotifRow({
 
 export default function NotificationsPage() {
   const router = useRouter();
-  const { isAuthenticated, user } = useAuthContext();
+  const { isAuthenticated, user, userProfile } = useAuthContext();
+  const { showNotif } = useAppStore();
 
-  const [notifs, setNotifs]     = useState<FirestoreNotification[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [showAuth, setShowAuth] = useState(false);
+  const [notifs, setNotifs]         = useState<FirestoreNotification[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [showAuth, setShowAuth]     = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  const myName = userProfile?.displayName || user?.displayName || user?.email || 'Someone';
 
   // Real-time listener
   useEffect(() => {
@@ -166,7 +251,45 @@ export default function NotificationsPage() {
     await markAllNotificationsRead(user.uid);
   };
 
+  const handleAcceptRequest = async (notif: FirestoreNotification) => {
+    if (!user) return;
+    const meta = notif.metadata as Record<string, unknown> | undefined;
+    const requestId = meta?.requestId as string | undefined;
+    if (!requestId) return;
+
+    setActionLoading(requestId);
+    try {
+      await acceptTeamRequest(requestId, user.uid, myName);
+      // Mark the notification as read
+      if (notif.id) await markNotificationRead(user.uid, notif.id);
+      showNotif(`Accepted teammate request from ${meta?.fromUserName ?? 'user'}! 🎉`, 'success');
+    } catch {
+      showNotif('Failed to accept request. Please try again.', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleRejectRequest = async (notif: FirestoreNotification) => {
+    if (!user) return;
+    const meta = notif.metadata as Record<string, unknown> | undefined;
+    const requestId = meta?.requestId as string | undefined;
+    if (!requestId) return;
+
+    setActionLoading(requestId);
+    try {
+      await rejectTeamRequest(requestId, user.uid, myName);
+      if (notif.id) await markNotificationRead(user.uid, notif.id);
+      showNotif('Request declined.', 'success');
+    } catch {
+      showNotif('Failed to decline request. Please try again.', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const unreadCount = notifs.filter((n) => !n.isRead).length;
+  const pendingRequests = notifs.filter((n) => user && isIncomingTeamRequest(n, user.uid) && !isAlreadyActioned(n));
   const grouped     = groupByDate(notifs);
 
   // ── Not authenticated ─────────────────────────────────────────────────────
@@ -201,6 +324,11 @@ export default function NotificationsPage() {
               You have{' '}
               <span style={{ color: '#6C3BFF', fontWeight: 600 }}>{unreadCount} unread</span>{' '}
               notification{unreadCount !== 1 ? 's' : ''}
+              {pendingRequests.length > 0 && (
+                <span style={{ color: '#F59E0B', marginLeft: 8 }}>
+                  · {pendingRequests.length} pending request{pendingRequests.length !== 1 ? 's' : ''}
+                </span>
+              )}
             </p>
           )}
         </div>
@@ -210,6 +338,32 @@ export default function NotificationsPage() {
           </button>
         )}
       </div>
+
+      {/* Pending Requests Banner */}
+      {pendingRequests.length > 0 && (
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #6C3BFF11, #F59E0B11)',
+            border: '1px solid #6C3BFF33',
+            borderRadius: 12,
+            padding: '16px 20px',
+            marginBottom: 20,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <div style={{ fontSize: 28 }}>🤝</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: '#F0F0FF', marginBottom: 2 }}>
+              {pendingRequests.length} Pending Teammate Request{pendingRequests.length !== 1 ? 's' : ''}
+            </div>
+            <div style={{ fontSize: 13, color: '#8B8BAD' }}>
+              People want to team up with you! Accept or decline below.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       {loading ? (
@@ -250,7 +404,16 @@ export default function NotificationsPage() {
               </div>
               <div style={{ padding: '0 8px' }}>
                 {group.map((n) => (
-                  <NotifRow key={n.id} notif={n} onRead={handleRead} />
+                  <NotifRow
+                    key={n.id}
+                    notif={n}
+                    myUid={user?.uid ?? ''}
+                    myName={myName}
+                    onRead={handleRead}
+                    onAccept={handleAcceptRequest}
+                    onReject={handleRejectRequest}
+                    actionLoading={actionLoading}
+                  />
                 ))}
               </div>
             </div>

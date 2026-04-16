@@ -631,6 +631,184 @@ export async function createTeamRequest(
   return ref.id;
 }
 
+export async function sendTeammateRequest(params: {
+  fromUserId: string;
+  fromUserName: string;
+  fromUserPhoto?: string;
+  toUserId: string;
+  toUserName: string;
+  requiredSkills?: string[];
+  teamSize?: number;
+  role?: string;
+  message?: string;
+}): Promise<string> {
+  const now = Timestamp.now();
+  const expiresAt = Timestamp.fromDate(
+    new Date(now.toDate().getTime() + 30 * 24 * 60 * 60 * 1000)
+  );
+  const requestRef = doc(collection(db, 'teamRequests'));
+  const notificationRef = doc(
+    collection(db, 'users', params.toUserId, 'notifications')
+  );
+  const batch = writeBatch(db);
+
+  batch.set(requestRef, {
+    fromUserId: params.fromUserId,
+    fromUserName: params.fromUserName,
+    fromUserPhoto: params.fromUserPhoto ?? '',
+    toUserId: params.toUserId,
+    eventId: null,
+    type: 'looking_for_members',
+    requiredSkills: params.requiredSkills ?? [],
+    teamSize: params.teamSize ?? 2,
+    role: params.role ?? 'Teammate',
+    message:
+      params.message ??
+      `${params.fromUserName} sent you a teammate request.`,
+    expectations: '',
+    preferredCommunication: '',
+    status: 'open',
+    responses: 0,
+    createdAt: serverTimestamp(),
+    expiresAt,
+  });
+
+  batch.set(notificationRef, {
+    type: 'team',
+    title: 'New Team Request',
+    message: `${params.fromUserName} sent you a request to connect for a team.`,
+    link: '/notifications',
+    isRead: false,
+    createdAt: serverTimestamp(),
+    metadata: {
+      requestId: requestRef.id,
+      fromUserId: params.fromUserId,
+      fromUserName: params.fromUserName,
+      toUserId: params.toUserId,
+      toUserName: params.toUserName,
+    },
+  });
+
+  await batch.commit();
+  return requestRef.id;
+}
+
+// ─── Received / Accept / Reject teammate requests ─────────────────────────────
+
+export async function getReceivedTeamRequests(
+  userId: string,
+  status = 'open'
+): Promise<TeamRequest[]> {
+  try {
+    const q = query(
+      collection(db, 'teamRequests'),
+      where('toUserId', '==', userId),
+      where('status', '==', status),
+      orderBy('createdAt', 'desc'),
+      limit(30)
+    );
+    const snap = await getDocs(q);
+    return safeDocs<TeamRequest>(snap);
+  } catch {
+    return [];
+  }
+}
+
+export async function getSentTeamRequests(
+  userId: string,
+  status = 'open'
+): Promise<TeamRequest[]> {
+  try {
+    const q = query(
+      collection(db, 'teamRequests'),
+      where('fromUserId', '==', userId),
+      where('status', '==', status),
+      orderBy('createdAt', 'desc'),
+      limit(30)
+    );
+    const snap = await getDocs(q);
+    return safeDocs<TeamRequest>(snap);
+  } catch {
+    return [];
+  }
+}
+
+export async function acceptTeamRequest(
+  requestId: string,
+  acceptorUserId: string,
+  acceptorName: string
+): Promise<void> {
+  const requestRef = doc(db, 'teamRequests', requestId);
+  const snap = await getDoc(requestRef);
+  if (!snap.exists()) throw new Error('Request not found');
+  const data = snap.data();
+
+  const batch = writeBatch(db);
+
+  // Mark request as accepted
+  batch.update(requestRef, { status: 'accepted' });
+
+  // Notify the sender that their request was accepted
+  const notificationRef = doc(
+    collection(db, 'users', data.fromUserId, 'notifications')
+  );
+  batch.set(notificationRef, {
+    type: 'team',
+    title: 'Request Accepted! 🎉',
+    message: `${acceptorName} accepted your teammate request.`,
+    link: '/teams',
+    isRead: false,
+    createdAt: serverTimestamp(),
+    metadata: {
+      requestId,
+      fromUserId: acceptorUserId,
+      fromUserName: acceptorName,
+      toUserId: data.fromUserId,
+      action: 'accepted',
+    },
+  });
+
+  await batch.commit();
+}
+
+export async function rejectTeamRequest(
+  requestId: string,
+  rejectorUserId: string,
+  rejectorName: string
+): Promise<void> {
+  const requestRef = doc(db, 'teamRequests', requestId);
+  const snap = await getDoc(requestRef);
+  if (!snap.exists()) throw new Error('Request not found');
+  const data = snap.data();
+
+  const batch = writeBatch(db);
+
+  // Mark request as closed
+  batch.update(requestRef, { status: 'closed' });
+
+  // Notify the sender that their request was declined
+  const notificationRef = doc(
+    collection(db, 'users', data.fromUserId, 'notifications')
+  );
+  batch.set(notificationRef, {
+    type: 'team',
+    title: 'Request Declined',
+    message: `${rejectorName} declined your teammate request.`,
+    link: '/teams',
+    isRead: false,
+    createdAt: serverTimestamp(),
+    metadata: {
+      requestId,
+      fromUserId: rejectorUserId,
+      fromUserName: rejectorName,
+      toUserId: data.fromUserId,
+      action: 'rejected',
+    },
+  });
+
+  await batch.commit();
+}
+
 // ─── Forum ────────────────────────────────────────────────────────────────────
 
 export async function getForumThreads(
@@ -868,6 +1046,140 @@ export function subscribeToContestLeaderboard(
   }
 }
 
+export async function createContest(
+  data: Omit<Contest, 'id' | 'createdAt'>,
+  userId: string
+): Promise<string> {
+  const ref = await addDoc(collection(db, 'contests'), {
+    ...data,
+    participants: data.participants ?? 0,
+    createdBy: userId,
+    createdAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export async function updateContest(
+  contestId: string,
+  data: Partial<Contest>
+): Promise<void> {
+  await updateDoc(doc(db, 'contests', contestId), {
+    ...data,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function deleteContest(contestId: string): Promise<void> {
+  await deleteDoc(doc(db, 'contests', contestId));
+}
+
+export async function registerForContest(
+  contestId: string,
+  userId: string
+): Promise<void> {
+  await setDoc(
+    doc(db, 'contests', contestId, 'participants', userId),
+    { joinedAt: serverTimestamp() }
+  );
+  await setDoc(
+    doc(db, 'contests', contestId),
+    { participants: increment(1) },
+    { merge: true }
+  );
+}
+
+// ─── Contest Seeding ──────────────────────────────────────────────────────────
+
+const SEED_CONTESTS = [
+  {
+    id: 'weekly-challenge-42',
+    title: 'Weekly Challenge #42',
+    description:
+      'Three algorithmic problems of increasing difficulty. Compete in 90 minutes and prove your skills!',
+    startTime: Timestamp.fromDate(new Date(Date.now() + 2 * 86400000)),
+    endTime: Timestamp.fromDate(new Date(Date.now() + 2 * 86400000 + 5400000)),
+    duration: 90,
+    challenges: ['ch1', 'ch2', 'ch3'],
+    participants: 0,
+    status: 'upcoming' as const,
+    prizes: [
+      { position: 1, amount: 5000, description: '🥇 1st Place' },
+      { position: 2, amount: 3000, description: '🥈 2nd Place' },
+      { position: 3, amount: 1000, description: '🥉 3rd Place' },
+    ],
+  },
+  {
+    id: 'data-structures-sprint',
+    title: 'Data Structures Sprint',
+    description:
+      'Master arrays, trees, and graphs in 60 minutes of intense problem solving. Open to all skill levels.',
+    startTime: Timestamp.fromDate(new Date(Date.now() - 1800000)),
+    endTime: Timestamp.fromDate(new Date(Date.now() + 1800000)),
+    duration: 60,
+    challenges: ['ch4', 'ch5'],
+    participants: 128,
+    status: 'live' as const,
+    prizes: [{ position: 1, amount: 2000, description: '🥇 1st Place' }],
+  },
+  {
+    id: 'dp-marathon',
+    title: 'DP Marathon',
+    description:
+      'Dynamic programming contest featuring 5 classic DP problems. Test your optimization skills!',
+    startTime: Timestamp.fromDate(new Date(Date.now() - 86400000 * 3)),
+    endTime: Timestamp.fromDate(
+      new Date(Date.now() - 86400000 * 3 + 7200000)
+    ),
+    duration: 120,
+    challenges: ['ch6', 'ch7', 'ch8', 'ch9', 'ch10'],
+    participants: 342,
+    status: 'ended' as const,
+    prizes: [{ position: 1, amount: 10000, description: '🥇 1st Place' }],
+  },
+  {
+    id: 'graphs-showdown',
+    title: 'Graphs Showdown',
+    description:
+      'Graph traversal, shortest paths, and minimum spanning trees — can you solve them all in 75 minutes?',
+    startTime: Timestamp.fromDate(new Date(Date.now() + 5 * 86400000)),
+    endTime: Timestamp.fromDate(
+      new Date(Date.now() + 5 * 86400000 + 4500000)
+    ),
+    duration: 75,
+    challenges: ['ch11', 'ch12'],
+    participants: 0,
+    status: 'upcoming' as const,
+    prizes: [
+      { position: 1, amount: 7500, description: '🥇 1st Place' },
+      { position: 2, amount: 2500, description: '🥈 2nd Place' },
+    ],
+  },
+];
+
+export async function seedContestsToFirestore(
+  userId: string
+): Promise<{ seeded: number; skipped: number }> {
+  const col = collection(db, 'contests');
+  const existingSnap = await getDocs(query(col, limit(100)));
+  const existingIds = new Set(existingSnap.docs.map((d) => d.id));
+
+  const missing = SEED_CONTESTS.filter((c) => !existingIds.has(c.id));
+  if (missing.length === 0)
+    return { seeded: 0, skipped: SEED_CONTESTS.length };
+
+  const batch = writeBatch(db);
+  for (const contest of missing) {
+    const ref = doc(col, contest.id);
+    batch.set(ref, {
+      ...contest,
+      createdBy: userId,
+      createdAt: serverTimestamp(),
+    });
+  }
+  await batch.commit();
+  return { seeded: missing.length, skipped: existingIds.size };
+}
+
 // ─── Global / Admin ───────────────────────────────────────────────────────────
 
 export async function getGlobalStats(): Promise<{
@@ -951,4 +1263,56 @@ export async function getUserMentorships(userId: string): Promise<Mentorship[]> 
   } catch {
     return [];
   }
+}
+
+// ─── Event seeding ────────────────────────────────────────────────────────────
+// Seeds static EVENTS into Firestore for any IDs that are missing.
+// Uses the caller's userId as createdBy (required by Firestore rules).
+// Safe to call multiple times — existing docs are skipped.
+import { EVENTS as STATIC_EVENTS } from '@/lib/data/events';
+
+export async function seedEventsToFirestore(userId: string): Promise<{ seeded: number; skipped: number }> {
+  const BATCH_LIMIT = 400;
+  const col = collection(db, 'events');
+  const base = Date.now();
+
+  // Fetch all existing event IDs in one query (ids only)
+  const existingSnap = await getDocs(query(col, limit(500)));
+  const existingIds = new Set(existingSnap.docs.map((d) => d.id));
+
+  const missing = STATIC_EVENTS.filter((e) => !existingIds.has(e.id));
+  if (missing.length === 0) return { seeded: 0, skipped: STATIC_EVENTS.length };
+
+  let batch = writeBatch(db);
+  let ops = 0;
+  let total = 0;
+
+  for (let i = 0; i < missing.length; i++) {
+    const event = missing[i];
+    const ref = doc(col, event.id);
+    batch.set(ref, {
+      ...event,
+      createdBy: userId,
+      registrationCount: event.registered ?? 0,
+      isFeatured: event.featured ?? false,
+      status: 'upcoming',
+      createdAt: new Date(base - (missing.length - i) * 1000),
+      updatedAt: new Date(base),
+    });
+    ops += 1;
+
+    if (ops >= BATCH_LIMIT) {
+      await batch.commit();
+      total += ops;
+      batch = writeBatch(db);
+      ops = 0;
+    }
+  }
+
+  if (ops > 0) {
+    await batch.commit();
+    total += ops;
+  }
+
+  return { seeded: total, skipped: existingIds.size };
 }
