@@ -430,12 +430,12 @@ export async function markAllNotificationsRead(userId: string): Promise<void> {
   } catch {}
 }
 
-export async function getUserActivity(userId: string): Promise<unknown[]> {
+export async function getUserActivity(userId: string, limitCount = 20): Promise<unknown[]> {
   try {
     const q = query(
       collection(db, 'users', userId, 'activityFeed'),
       orderBy('createdAt', 'desc'),
-      limit(20)
+      limit(limitCount)
     );
     const snap = await getDocs(q);
     return safeDocs<unknown>(snap);

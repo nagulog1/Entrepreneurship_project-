@@ -11,6 +11,7 @@ import {
   acceptTeamRequest,
   rejectTeamRequest,
 } from '@/lib/firebase/firestore';
+import { updateDoc, doc as firestoreDoc } from 'firebase/firestore';
 import { useAppStore } from '@/stores/useAppStore';
 import ShimmerCard from '@/components/shared/ShimmerCard';
 import AuthModal from '@/components/auth/AuthModal';
@@ -260,10 +261,16 @@ export default function NotificationsPage() {
     setActionLoading(requestId);
     try {
       await acceptTeamRequest(requestId, user.uid, myName);
-      // Mark the notification as read
-      if (notif.id) await markNotificationRead(user.uid, notif.id);
+      // Mark the notification as read and mark action so buttons disappear
+      if (notif.id) {
+        await updateDoc(firestoreDoc(db, 'users', user.uid, 'notifications', notif.id), {
+          isRead: true,
+          'metadata.action': 'accepted',
+        });
+      }
       showNotif(`Accepted teammate request from ${meta?.fromUserName ?? 'user'}! 🎉`, 'success');
-    } catch {
+    } catch (err) {
+      console.error('Accept error:', err);
       showNotif('Failed to accept request. Please try again.', 'error');
     } finally {
       setActionLoading(null);
@@ -279,9 +286,16 @@ export default function NotificationsPage() {
     setActionLoading(requestId);
     try {
       await rejectTeamRequest(requestId, user.uid, myName);
-      if (notif.id) await markNotificationRead(user.uid, notif.id);
+      // Mark the notification as read and mark action so buttons disappear
+      if (notif.id) {
+        await updateDoc(firestoreDoc(db, 'users', user.uid, 'notifications', notif.id), {
+          isRead: true,
+          'metadata.action': 'rejected',
+        });
+      }
       showNotif('Request declined.', 'success');
-    } catch {
+    } catch (err) {
+      console.error('Reject error:', err);
       showNotif('Failed to decline request. Please try again.', 'error');
     } finally {
       setActionLoading(null);

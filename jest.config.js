@@ -1,4 +1,4 @@
-/** @type {import('jest').Config} */
+add contests in the contest section and store that in the firestore /** @type {import('jest').Config} */
 module.exports = {
   testEnvironment: 'jsdom',
   roots: ['<rootDir>/src', '<rootDir>/__tests__'],

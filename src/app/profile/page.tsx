@@ -55,6 +55,7 @@ export default function ProfilePage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [events, setEvents] = useState<Event[]>(EVENTS.slice(0, 4));
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>(RECENT_ACTIVITY);
+  const [activityLevels, setActivityLevels] = useState<number[]>(Array(84).fill(0));
   const { xp, streak, solvedChallenges, profile, updateProfile, showNotif } = useAppStore();
   const { user, userProfile, refreshUserProfile } = useAuthContext();
   const { level, levelXp, levelTitle } = useLevel();
@@ -74,12 +75,34 @@ export default function ProfilePage() {
       return;
     }
 
-    getUserActivity(user.uid)
+    getUserActivity(user.uid, 500)
       .then((items) => {
         if (!items.length) {
           setRecentActivity(RECENT_ACTIVITY);
           return;
         }
+
+        const counts = new Array(84).fill(0);
+        const today = new Date();
+        today.setHours(23, 59, 59, 999);
+
+        // Process activities for heatmap
+        items.forEach((item) => {
+          const activity = item as Record<string, unknown>;
+          if (!activity.createdAt) return;
+          let d: Date;
+          if (typeof (activity.createdAt as any).toDate === "function") {
+            d = (activity.createdAt as any).toDate();
+          } else {
+            d = new Date(activity.createdAt as string | number);
+          }
+          const diffTime = today.getTime() - d.getTime();
+          const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+          if (diffDays >= 0 && diffDays < 84) {
+            counts[83 - diffDays]++; // index 83 is today, index 0 is 83 days ago
+          }
+        });
+        setActivityLevels(counts);
 
         const mapped: ActivityItem[] = items.slice(0, 6).map((item) => {
           const activity = item as Record<string, unknown>;
@@ -329,17 +352,18 @@ export default function ProfilePage() {
               Activity (Last 12 Weeks)
             </h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 3 }}>
-              {Array.from({ length: 84 }, (_, i) => {
-                const intensity = Math.random();
-                const active = Math.random() > 0.4;
+              {activityLevels.map((count, i) => {
+                const active = count > 0;
+                const intensity = Math.min(count * 0.3, 1);
                 return (
                   <div
                     key={i}
+                    title={active ? `${count} activities` : "No activity"}
                     style={{
                       width: "100%",
                       paddingBottom: "100%",
                       borderRadius: 2,
-                      background: active ? `rgba(108, 59, 255, ${0.2 + intensity * 0.8})` : "#16213E",
+                      background: active ? `rgba(108, 59, 255, ${0.3 + intensity * 0.7})` : "#16213E",
                     }}
                   />
                 );

@@ -21,7 +21,7 @@ export default function HomePage() {
   const [topUsers, setTopUsers] = useState<User[]>(USERS.slice(0, 3));
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  useEffect(() => {0
     let mounted = true;
 
     Promise.all([

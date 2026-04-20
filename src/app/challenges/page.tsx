@@ -33,10 +33,26 @@ export default function ChallengesPage() {
     let mounted = true;
 
     getChallenges({ limitCount: 120 })
-      .then((docs) => {
+      .then(async (docs) => {
         if (!mounted) return;
-        const mapped = docs.map((c) => mapChallengeToListChallenge(c));
-        setChallenges(mapped.length ? mapped : CHALLENGES);
+        if (docs.length >= 10) {
+          // DB already has enough challenges
+          const mapped = docs.map((c) => mapChallengeToListChallenge(c));
+          setChallenges(mapped);
+          return;
+        }
+        // Seed challenges to Firestore on first visit
+        try {
+          const { seedChallenges } = await import("@/lib/firebase/seedChallenges");
+          await seedChallenges();
+          // Re-fetch after seeding
+          const freshDocs = await getChallenges({ limitCount: 120 });
+          if (!mounted) return;
+          const mapped = freshDocs.map((c) => mapChallengeToListChallenge(c));
+          setChallenges(mapped.length ? mapped : CHALLENGES);
+        } catch {
+          if (mounted) setChallenges(CHALLENGES);
+        }
       })
       .catch(() => {
         if (mounted) setChallenges(CHALLENGES);

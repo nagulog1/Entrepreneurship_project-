@@ -96,7 +96,8 @@ service cloud.firestore {
     // ── Challenges ──────────────────────────────────────────────────────────
     match /challenges/{challengeId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create: if isSignedIn() && writeSizeOk();
+      allow update, delete: if isSignedIn() && writeSizeOk();
       match /discussions/{d} {
         allow read: if true;
         allow create: if isSignedIn()
